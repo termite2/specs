@@ -1,0 +1,103 @@
+import <class.tsl>
+
+template uvc_linux(uvc_drv drv, uvc_dev dev)
+
+derive uvc_os;
+
+process pos {
+    drv.probe();
+    forever {
+        if(dev.packet_arrived()){
+            packet_arrived();
+            dev.ack_packet();
+        } else {
+            choice {
+                configure();
+                start_streaming();
+                stop_streaming();
+                {};
+            };
+        };
+        idle: pause;
+    };
+};
+
+task void configure(){
+    choice {
+        {
+            configure_in_progress: drv.configure_brightness(*);
+            assert(dev.get_brightness() == drv.req_brightness);
+        };
+        {
+            configure_in_progress: drv.configure_contrast(*);
+            assert(dev.get_contrast() == drv.req_contrast);
+        };
+        {
+            configure_in_progress: drv.configure_hue(*);
+            assert(dev.get_hue() == drv.req_hue);
+        };
+        {
+            configure_in_progress: drv.configure_saturation(*);
+            assert(dev.get_saturation() == drv.req_saturation);
+        };
+        {
+            configure_in_progress: drv.configure_sharpness(*);
+            assert(dev.get_sharpness() == drv.req_sharpness);
+        };
+        {
+            configure_in_progress: drv.configure_gamma(*);
+            assert(dev.get_gamma() == drv.req_gamma);
+        };
+        {
+            configure_in_progress: drv.configure_power_mode(*);
+            assert(dev.get_power_mode() == drv.req_power_mode);
+        };
+        {
+            configure_in_progress: drv.configure_white_balance_temperature(*);
+            assert(dev.get_whiteBalanceTemperature() == drv.req_white_balance_temperature);
+        };
+        {
+            configure_in_progress: drv.configure_backlight_compensation(*);
+            assert(dev.get_backlightCompensation() == drv.req_backlight_compensation);
+        };
+        {
+            configure_in_progress: drv.configure_power_line_frequency(*);
+            assert(dev.get_powerLineFrequency() == drv.req_power_line_frequency);
+        };
+        {
+            configure_in_progress: drv.configure_white_balance_temperature_auto(*);
+            assert(dev.get_whiteBalanceTemperatureAuto() == drv.req_white_balance_temperature_auto);
+        };
+    };
+};
+
+task void start_streaming(){
+    drv.start_streaming(*, *, *);
+    assert(dev.is_streaming()     == true);
+    assert(dev.getFormatIndex()   == drv.reqFormatIndex);
+    assert(dev.getFrameIndex()    == drv.reqFrameIndex);
+    assert(dev.getFrameInterval() == drv.reqFrameInterval);
+};
+
+task void stop_streaming(){
+    drv.stop_streaming();
+    assert(dev.is_streaming() == false);
+};
+
+bool packet_acked;
+
+task void packet_arrived(){
+    packet_acked = false;
+    drv.packet_received(dev.get_size());
+    assert(packet_acked == true);
+};
+
+task controllable void ack_packet(uvc_packet_t packet){
+    assert(packet.error == dev.get_error());
+    assert(packet.data  == dev.get_packet_data());
+    assert(packet.end_of_frame == dev.get_end_of_frame());
+    assert(packet.size         == dev.get_size());
+    packet_acked = true;
+};
+
+endtemplate

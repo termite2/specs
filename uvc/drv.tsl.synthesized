@@ -1,0 +1,120 @@
+import <class.tsl>
+import <dev.tsl>
+
+template uvc_linux_drv(uvc_webcam dev, uvc_os os)
+
+derive uvc_drv;
+
+task uncontrollable void probe(){
+    dev.set_configuration(16'h1);
+    {};
+    assert(dev.usb_dev_config == configuration1);
+};
+
+//configuration
+task uncontrollable void configure_brightness(uint<16> brightness) {
+    req_brightness = brightness;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'h2, 8'h0 ++ 8'h3, 16'h2, req_brightness ++ /*any value*/192'h0, _);
+    //control_transfer(0x21, 0x01, 0x0200, 0x0300, 0x0002, ...);
+    {};
+};
+
+task uncontrollable void configure_contrast(uint<16> contrast) {
+    req_contrast = contrast;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'h3, 8'h0 ++ 8'h3, 16'h2, req_contrast ++ /*any value*/192'h0, _);
+    {};
+};
+
+task uncontrollable void configure_hue(uint<16> hue) {
+    req_hue = hue;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'h6, 8'h0 ++ 8'h3, 16'h2, req_hue ++ /*any value*/192'h0, _);
+    {};
+};
+
+task uncontrollable void configure_saturation(uint<16> saturation) {
+    req_saturation = saturation;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'h7, 8'h0 ++ 8'h3, 16'h2, req_saturation ++ /*any value*/192'h0, _);
+    {};
+};
+
+task uncontrollable void configure_sharpness(uint<16> sharpness) {
+    req_sharpness = sharpness;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'h8, 8'h0 ++ 8'h3, 16'h2, req_sharpness ++ /*any value*/192'h0, _);
+    {};
+};
+
+task uncontrollable void configure_gamma(uint<16> gamma) {
+    req_gamma = gamma;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'h9, 8'h0 ++ 8'h3, 16'h2, req_gamma ++ /*any value*/192'h0, _);
+    {};
+};
+
+task uncontrollable void configure_power_mode(uint<8> power_mode) {
+    req_power_mode = power_mode;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'h1, 8'h0 ++ 8'h0, 16'h1, req_power_mode ++ /*any value*/200'h0, _);
+    {};
+};
+
+task uncontrollable void configure_white_balance_temperature(uint<16> val){
+    req_white_balance_temperature = val;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'ha, 8'h0 ++ 8'h3, 16'h2, req_white_balance_temperature ++ /*any value*/192'h0, _);
+    {};
+};
+
+task uncontrollable void configure_backlight_compensation(uint<16> val){
+    req_backlight_compensation = val;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'h1, 8'h0 ++ 8'h3, 16'h2, req_backlight_compensation ++ /*any value*/192'h0, _);
+    {};
+};
+
+task uncontrollable void configure_power_line_frequency(uint<8> val){
+    req_power_line_frequency = val;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'h5, 8'h0 ++ 8'h3, 16'h1, req_power_line_frequency ++ /*any value*/200'h0, _);
+    {};
+};
+
+task uncontrollable void configure_white_balance_temperature_auto(uint<8> val){
+    req_white_balance_temperature_auto = val;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'hb, 8'h0 ++ 8'h3, 16'h1, req_white_balance_temperature_auto ++ /*any value*/200'h0, _);
+    {};
+};
+
+//streaming
+task uncontrollable void start_streaming(uint<8> formatIndex, uint<8> frameIndex, uint<32> frameInterval) {
+    reqFormatIndex   = formatIndex;
+    reqFrameIndex    = frameIndex;
+    reqFrameInterval = frameInterval;
+    
+    uint<208> buffer;
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h1, 8'h83, 16'h100, 16'h1, /* any value */16'd26, /* any value */208'h0, buffer);
+    //control_transfer(0xa1, 0x83, 0x0100, 0x0001, 26, 0, _); 
+
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h0, 8'h1, 8'h0 ++ 8'h2, 8'h1 ++ 8'h0, 16'd26, /*any value*/16'h0 ++ reqFormatIndex ++ reqFrameIndex ++ reqFrameInterval ++ buffer[64:79] ++ buffer[80:95] ++ buffer[96:111] ++ buffer[112:127] ++ buffer[128:143] ++ buffer[144:175] ++ buffer[176:207], _);
+    //control_transfer(0x21, 0x01, 0x0200, 0x0100, 26, buf, _); 
+
+    dev.control_transfer(5'h1 ++ 2'h1 ++ 1'h1, 8'h81, 16'h100, 16'h1, /* any value */16'd26, /* any value */208'h0, _);
+    //control_transfer(0xa1, 0x81, 0x0100, 0x0001, 26, 0, _); 
+
+    dev.set_interface_alt_setting(16'h1, 16'h1); //TODO: not always interface 1
+    {};
+};
+
+task uncontrollable void stop_streaming() {
+    dev.set_interface_alt_setting(16'h1, 16'h0); 
+    {};
+};
+
+task uncontrollable void packet_received(uint<32> size) {
+    if (((dev.packet_data[9:9] == 1'h1) && (dev.packet_data[14:14] == 1'h1))) {
+        os.ack_packet(uvc_packet_t{1'h1,1'h1,dev.packet_data[96:24655], size});
+    } else if ((dev.packet_data[9:9] == 1'h1)) {
+        os.ack_packet(uvc_packet_t{1'h1,1'h0,dev.packet_data[96:24655], size});
+    } else if ((dev.packet_data[14:14] == 1'h1)) {
+        os.ack_packet(uvc_packet_t{1'h0,1'h1,dev.packet_data[96:24655], size});
+    } else {
+        os.ack_packet(uvc_packet_t{1'h0,1'h0,dev.packet_data[96:24655], size});
+    };
+    {};
+};
+
+endtemplate

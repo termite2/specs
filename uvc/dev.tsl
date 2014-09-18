@@ -1,0 +1,392 @@
+import <class.tsl>
+
+template uvc_webcam(uvc_os os)
+
+derive uvc_dev;
+
+typedef enum {
+    as0,
+    as1,
+    as2,
+    as3,
+    as4,
+    as5,
+    as6
+} usb_int_alt_t;
+
+usb_int_alt_t usb_int_alt_1;
+
+typedef struct {
+    uint<16> hint;
+    uint<8>  formatIndex;
+    uint<8>  frameIndex;
+    uint<32> frameInterval;
+    uint<16> keyFrameInterval;
+    uint<16> frameRate;
+    uint<16> compQuality;
+    uint<16> compWindowSize;
+    uint<16> delay;
+    uint<32> maxVideoFrameSize;
+    uint<32> maxPayloadTransferSize;
+} parameter_buf_t;
+
+// Streaming parameter state
+parameter_buf_t streaming_params;
+
+function uint<8> getFormatIndex(){
+    return streaming_params.formatIndex;
+};
+
+function uint<8> getFrameIndex(){
+    return streaming_params.frameIndex;
+};
+
+function uint<32> getFrameInterval(){
+    return streaming_params.frameInterval;
+};
+
+//Processing unit command codes
+const uint<8> PU_BRIGHTNESS_CONTROL                     = 8'h02;
+const uint<8> PU_CONTRAST_CONTROL                       = 8'h03;
+const uint<8> PU_HUE_CONTROL                            = 8'h06;
+const uint<8> PU_SATURATION_CONTROL                     = 8'h07;
+const uint<8> PU_SHARPNESS_CONTROL                      = 8'h08;
+const uint<8> PU_GAMMA_CONTROL                          = 8'h09;
+const uint<8> PU_WHITE_BALANCE_TEMPERATURE_CONTROL      = 8'h0A;
+const uint<8> PU_BACKLIGHT_COMPENSATION_CONTROL         = 8'h01;
+const uint<8> PU_POWER_LINE_FREQUENCY_CONTROL           = 8'h05;
+const uint<8> PU_WHITE_BALANCE_TEMPERATURE_AUTO_CONTROL = 8'h0B;
+
+//Configuration settings
+uint<16> brightness;
+uint<16> contrast;
+uint<16> hue;
+uint<16> saturation;
+uint<16> sharpness;
+uint<16> gamma;
+uint<16> whiteBalanceTemperature;
+uint<16> backlightCompensation;
+uint<8>  powerLineFrequency;
+uint<8>  whiteBalanceTemperatureAuto;
+
+//OS getter methods
+function uint<16> get_brightness(){
+    return brightness;
+};
+
+function uint<16> get_contrast(){
+    return contrast;
+};
+
+function uint<16> get_hue(){
+    return hue;
+};
+
+function uint<16> get_saturation(){
+    return saturation;
+};
+
+function uint<16> get_sharpness(){
+    return sharpness;
+};
+
+function uint<16> get_gamma(){
+    return gamma;
+};
+
+function uint<16> get_whiteBalanceTemperature(){
+    return whiteBalanceTemperature;
+};
+
+function uint<16> get_backlightCompensation(){
+    return backlightCompensation;
+};
+
+function uint<8> get_powerLineFrequency(){
+    return powerLineFrequency;
+};
+
+function uint<8> get_whiteBalanceTemperatureAuto(){
+    return whiteBalanceTemperatureAuto;
+};
+
+//Interface command codes
+const uint<8> VC_VIDEO_POWER_MODE_CONTROL   = 8'h01;
+const uint<8> VC_REQUEST_ERROR_MODE_CONTROL = 8'h02;
+
+//Control interface configuration settings
+uint<8> devicePowerMode;
+
+function uint<8> get_power_mode(){
+    return devicePowerMode;
+};
+
+bool in_set_configuration = false;
+task controllable void set_configuration(uint<16> config){
+    in_set_configuration = true;
+    control_transfer_proc(8'd0, 8'd9, config, 16'd0, 16'd0, 208'd0, _);
+    in_set_configuration = false;
+};
+
+typedef enum {
+    idle,
+    get_request_done,
+    set_request_done,
+    get_request2_done,
+    streaming
+} device_state_t;
+
+device_state_t device_state = idle;
+
+function bool is_streaming(){
+    return device_state==streaming;
+};
+
+bool in_set_interface = false;
+task controllable void set_interface_alt_setting(uint<16> iface, uint<16> alt){
+    in_set_interface = true;
+    control_transfer_proc(8'd1, 8'h11, alt, iface, 16'd0, 208'd0, _);
+    in_set_interface = false;
+};
+
+task controllable void control_transfer(uint<8> bmRequestType, uint<8> bRequest, uint<16> wValue, uint<16> wIndex, uint<16> wLength, uint<208> data, out uint<208> data_out){
+    control_transfer_proc(bmRequestType, bRequest, wValue, wIndex, wLength, data, data_out);
+};
+
+procedure void control_transfer_proc(uint<8> bmRequestType, uint<8> bRequest, uint<16> wValue, uint<16> wIndex, uint<16> wLength, uint<208> data, out uint<208> data_out){
+    // 0 = host to device 
+    // 1 = device to host
+    uint<1> direction = bmRequestType[7:7];
+    // 0 = standard
+    // 1 = class
+    // 2 = vendor
+    // 3 = reserved
+    uint <2> type = bmRequestType[5:6];
+    // 0 = device
+    // 1 = interface
+    // 2 = endpoint
+    // 3 = other
+    uint <5> recipient = bmRequestType[0:4];
+
+    if(direction == 1'd0){
+        // a write
+
+        if(type == 2'd0){
+            // standard
+            if(recipient == 5'd0){
+                //device
+                if(bRequest == 8'd9){
+                    //set configuration
+                    assert(wIndex == 16'd0);
+                    assert(wLength == 16'd0);
+                    assert(in_set_configuration);
+                    case (wValue){
+                        16'd0 : usb_dev_config = no_configuration;
+                        16'd1 : usb_dev_config = configuration1;
+                    };
+                };
+            }
+
+            else if (recipient == 5'd1){
+                assert(wLength == 16'd0);
+                if(bRequest == 8'h11){ //set interface
+                    case (wIndex){ //interface number
+                        16'd1 : {
+                            assert(in_set_interface);
+                            case (wValue) { //interface alternate
+                                16'd0 : usb_int_alt_1 = as0;
+                                16'd1 : usb_int_alt_1 = as1;
+                                16'd2 : usb_int_alt_1 = as2;
+                                16'd3 : usb_int_alt_1 = as3;
+                                16'd4 : usb_int_alt_1 = as4;
+                                16'd5 : usb_int_alt_1 = as5;
+                                16'd6 : usb_int_alt_1 = as6;
+                            };
+
+                            if(device_state == get_request2_done && usb_int_alt_1 != as0) {
+                                device_state = streaming;
+                            }
+
+                            else if(usb_int_alt_1 == as0){
+                                device_state = idle;
+                            };
+                        };
+                    };
+                };
+            };
+        }
+
+        else if(type == 2'd1){
+            // class
+            if(recipient == 5'd1){
+                // interface
+
+                if(usb_dev_config == configuration1){
+
+                    if(bRequest == 8'h01){ //SET_CUR
+                        assert(wValue[0:7] == 8'd0);
+
+                        // requests directed at an interface
+                        if(wIndex[8:15] == 8'd0 && wIndex[0:7] == 8'd0){ // control interface is interface 0
+                            if (wValue[8:15] == VC_VIDEO_POWER_MODE_CONTROL){
+                                assert(wLength == 16'd1);
+                                devicePowerMode = data[0:7];
+                            };
+                        }
+
+                        // requests directed at a processing unit
+                        else if(wIndex[8:15] == 8'd3 && wIndex[0:7] == 8'd0) {
+                            // our processing unit is at unit id == 3 and lives in interface 0
+
+                            if(wValue[8:15] == PU_BRIGHTNESS_CONTROL){
+                                assert(wLength == 16'd2);
+                                brightness = data[0:15];
+                            } else if (wValue[8:15] == PU_CONTRAST_CONTROL){
+                                assert(wLength == 16'd2);
+                                contrast = data[0:15];
+                            } else if (wValue[8:15] == PU_HUE_CONTROL){
+                                assert(wLength == 16'd2);
+                                hue = data[0:15];
+                            } else if (wValue[8:15] == PU_SATURATION_CONTROL){
+                                assert(wLength == 16'd2);
+                                saturation = data[0:15];
+                            } else if (wValue[8:15] == PU_SHARPNESS_CONTROL){
+                                assert(wLength == 16'd2);
+                                sharpness = data[0:15];
+                            } else if (wValue[8:15] == PU_GAMMA_CONTROL){
+                                assert(wLength == 16'd2);
+                                gamma = data[0:15];
+                            } else if (wValue[8:15] == PU_WHITE_BALANCE_TEMPERATURE_CONTROL){
+                                assert(wLength == 16'd2);
+                                whiteBalanceTemperature = data[0:15];
+                            } else if (wValue[8:15] == PU_BACKLIGHT_COMPENSATION_CONTROL){
+                                assert(wLength == 16'd2);
+                                backlightCompensation = data[0:15];
+                            } else if (wValue[8:15] == PU_POWER_LINE_FREQUENCY_CONTROL){
+                                assert(wLength == 16'd1);
+                                powerLineFrequency = data[0:7];
+                            } else if (wValue[8:15] == PU_WHITE_BALANCE_TEMPERATURE_AUTO_CONTROL){
+                                assert(wLength == 16'd1);
+                                whiteBalanceTemperatureAuto = data[0:7];
+                            };
+                        }
+
+                        else if(wValue[8:15] == 8'h2 && wIndex[0:7] == 8'h01 && wIndex[8:15] == 8'h0){ //To videostreaming interface (01)
+                            // write video descriptor
+                            assert(wLength == 16'd26);
+
+                            //TODO: hint?
+                            streaming_params.formatIndex   = data[16:23];
+                            streaming_params.frameIndex    = data[24:31];
+                            streaming_params.frameInterval = data[32:63];
+                            assert(streaming_params.keyFrameInterval       == data[64:79]);
+                            assert(streaming_params.frameRate              == data[80:95]);
+                            assert(streaming_params.compQuality            == data[96:111]);
+                            assert(streaming_params.compWindowSize         == data[112:127]);
+                            assert(streaming_params.delay                  == data[128:143]);
+                            assert(streaming_params.maxVideoFrameSize      == data[144:175]);
+                            assert(streaming_params.maxPayloadTransferSize == data[176:207]);
+
+                            if(device_state == get_request_done){
+                                device_state = set_request_done;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+    } else {
+        // a read
+        if(type == 2'd1){
+            // class
+            if(recipient == 5'd1){
+                // interface
+
+                if(usb_dev_config == configuration1){
+                    // read video descriptor
+                    if(((bRequest == 8'h83) || (bRequest == 8'h81)) && wValue == 16'h100 && wIndex == 16'h1){
+                        if(device_state == idle && bRequest == 8'h83){
+                            device_state = get_request_done;
+                        } else if (device_state == set_request_done && bRequest == 8'h81){
+                            device_state = get_request2_done;
+                        };
+
+                        data_out[16:23]   = streaming_params.formatIndex;
+                        data_out[24:31]   = streaming_params.frameIndex;
+                        data_out[32:63]   = streaming_params.frameInterval;
+                        data_out[64:79]   = streaming_params.keyFrameInterval;
+                        data_out[80:95]   = streaming_params.frameRate;
+                        data_out[96:111]  = streaming_params.compQuality;
+                        data_out[112:127] = streaming_params.compWindowSize;
+                        data_out[128:143] = streaming_params.delay;
+                        data_out[144:175] = streaming_params.maxVideoFrameSize;
+                        data_out[176:207] = streaming_params.maxPayloadTransferSize;
+                    };
+                };
+            };
+        };
+    };
+};
+
+export uint<24656> packet_data;
+uint<32> packet_size;
+
+bool packet_flag = false;
+
+process pstream {
+    forever {
+        choice {
+            {
+                if(is_streaming()){
+                    //Assemble the packet
+                    packet_data[0:7]      = 8'd12; //header length
+                    packet_data[8:8]      = 0;     //frame toggle
+                    packet_data[9:9]      = *;     //end of frame
+                    packet_data[10:10]    = 1;     //presentation time is present
+                    packet_data[11:11]    = 1;     //source clock reference is present
+                    packet_data[12:12]    = 0;     //payload specific bit
+                    packet_data[13:13]    = 0;     //still image
+                    packet_data[14:14]    = *;     //Error
+                    packet_data[15:15]    = 0;     //TODO: I have no idea
+                    packet_data[96:24655] = *;     //Packet data
+
+                    packet_size           = *;
+
+                    //os.packet_arrived();
+
+                    packet_flag = true;
+                    wait(packet_flag == false);
+                };
+            };
+            {};
+        };
+        pause;
+    };
+};
+
+function bool packet_arrived(){
+    return packet_flag;
+};
+
+procedure void ack_packet(){
+    packet_flag = false;
+};
+
+function uint<1> get_error(){
+    return packet_data[14:14];
+};
+
+function uint<24560> get_packet_data(){
+    return packet_data[96:24655];
+};
+
+function uint<1> get_end_of_frame(){
+    return packet_data[9:9];
+};
+
+function uint<32> get_size(){
+    return packet_size;
+};
+
+endtemplate
+

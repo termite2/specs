@@ -1,0 +1,14 @@
+/* Main template: instantiates and connects device, driver, and OS templates.
+ */
+
+import <os.tsl>
+import <dev.tsl>
+import <drv.tsl>
+
+template main
+
+instance uvc_linux           os  (drv, dev);
+instance uvc_webcam          dev (os);
+instance uvc_linux_drv       drv (dev, os);
+
+endtemplate

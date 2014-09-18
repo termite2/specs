@@ -1,0 +1,104 @@
+typedef struct {
+    uint<1>     end_of_frame;
+    uint<1>     error;
+    uint<24560> data;
+    uint<32>    size;
+} uvc_packet_t;
+
+typedef enum {
+    no_configuration,
+    configuration1
+} usb_dev_config_t;
+
+template uvc_dev
+
+export usb_dev_config_t usb_dev_config = no_configuration;
+
+//Configuration
+function uint<16> get_brightness();
+function uint<16> get_contrast();
+function uint<16> get_hue();
+function uint<16> get_saturation();
+function uint<16> get_sharpness();
+function uint<16> get_gamma();
+function uint<16> get_whiteBalanceTemperature();
+function uint<16> get_backlightCompensation();
+function uint<8>  get_powerLineFrequency();
+function uint<8>  get_whiteBalanceTemperatureAuto();
+
+function uint<8>  get_power_mode();
+
+//Streaming params
+function bool is_streaming();
+function uint<8> getFormatIndex();
+function uint<8> getFrameIndex();
+function uint<32> getFrameInterval();
+
+//Packet synchronization
+function bool packet_arrived();
+procedure void ack_packet();
+
+//Packet data
+function uint<1> get_error();
+function uint<24560> get_packet_data();
+function uint<1> get_end_of_frame();
+function uint<32> get_size();
+
+endtemplate
+
+template uvc_drv
+
+//probe
+task uncontrollable void probe();
+
+//configuration
+export uint<16> req_brightness;
+task uncontrollable void configure_brightness(uint<16> brightness);
+
+export uint<16> req_contrast;
+task uncontrollable void configure_contrast(uint<16> contrast);
+
+export uint<16> req_hue;
+task uncontrollable void configure_hue(uint<16> hue);
+
+export uint<16> req_saturation;
+task uncontrollable void configure_saturation(uint<16> saturation);
+
+export uint<16> req_sharpness;
+task uncontrollable void configure_sharpness(uint<16> sharpness);
+
+export uint<16> req_gamma;
+task uncontrollable void configure_gamma(uint<16> gamma);
+
+export uint<8> req_power_mode;
+task uncontrollable void configure_power_mode(uint<8> power_mode);
+
+export uint<16> req_white_balance_temperature;
+task uncontrollable void configure_white_balance_temperature(uint<16> val);
+
+export uint<16> req_backlight_compensation;
+task uncontrollable void configure_backlight_compensation(uint<16> val);
+
+export uint<8> req_power_line_frequency;
+task uncontrollable void configure_power_line_frequency(uint<8> val);
+
+export uint<8> req_white_balance_temperature_auto;
+task uncontrollable void configure_white_balance_temperature_auto(uint<8> val);
+
+//streaming
+export uint<8>  reqFormatIndex;
+export uint<8>  reqFrameIndex;
+export uint<32> reqFrameInterval;
+task uncontrollable void start_streaming(uint<8> formatIndex, uint<8> frameIndex, uint<32> frameInterval);
+
+task uncontrollable void stop_streaming();
+task uncontrollable void packet_received(uint<32> size);
+
+endtemplate
+
+template uvc_os
+
+task void packet_arrived();
+task controllable void ack_packet(uvc_packet_t packet);
+
+endtemplate
