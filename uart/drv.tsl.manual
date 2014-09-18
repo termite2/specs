@@ -1,0 +1,52 @@
+import <class.tsl>
+import <16450.tsl>
+
+template uart_linux_drv(uart_16450 dev, uart_os os)
+
+derive uart_drv;
+
+task uncontrollable void probe() {
+    
+    uint<8> old_lcr = dev.read8(8'h3);
+    
+    uint<8> new_lcr;
+    new_lcr[0:6] = old_lcr[0:6];
+    new_lcr[7:7] = 0;
+    dev.write8_A3(new_lcr);
+
+    dev.write8_A1(8'hff);
+};
+
+task uncontrollable void send(uint<8> data) {
+    dev.write8_A0(data);
+};
+
+task uncontrollable void configure(wl_t wl, uint<1> stop_bit, uint<1> parity, uint<1> parity_even, uint<1> stick_parity, uint<16> divisor) {
+    pause; // @ bug workaround
+
+    uint<2> wlbits = case (wl) {
+                 bits5 : 2'd0;
+                 bits6 : 2'd1;
+                 bits7 : 2'd2;
+                 bits8 : 2'd3;
+             };
+    dev.write8_A3(7'h0 ++ 1'h1);
+    dev.write8_A0(divisor[0:7]);
+    dev.write8_A1(divisor[8:15]);
+    dev.write8_A3(wlbits ++ stop_bit ++ parity ++ parity_even ++ stick_parity ++ 1'h0 ++ 1'h0);
+};
+
+task uncontrollable void isr() {
+    uint<8> iir = dev.read8(8'd2);
+    uint<8> new_lcr;
+    uint<8> old_lcr;
+
+    if(iir[0:2] == 3'h2){
+        os.sent_ack();
+    } else if(iir[0:2] == 3'h4){
+        uint<8> result = dev.read8(8'h0);
+        os.recv_ack(result);
+    };
+};
+
+endtemplate

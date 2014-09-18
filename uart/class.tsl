@@ -1,0 +1,39 @@
+typedef enum {
+    bits5,
+    bits6,
+    bits7,
+    bits8
+} wl_t;
+
+template uart_dev
+
+function uint<16> get_divisor();
+function uint<1> get_stick_parity();
+function uint<1> get_parity_even();
+function uint<1> get_parity();
+function uint<1> get_stop_bit();
+function wl_t get_word_length();
+task void byte_recvd(uint<8> byte, uint<1> parity_err, uint<1> framing_err, uint<1> breakk);
+function bool int_pending();
+
+endtemplate
+
+template uart_drv
+
+task uncontrollable void probe();
+task uncontrollable void send(uint<8> data);
+task uncontrollable void configure(wl_t wl, uint<1> stop_bit, uint<1> parity, uint<1> parity_even, uint<1> stick_parity, uint<16> divisor);
+task uncontrollable void isr();
+
+endtemplate
+
+template uart_os
+
+export uint<8> data;
+
+procedure void config_updated();
+procedure void byte_sent(uint<8> dat);
+task controllable void recv_ack(uint<8> data);
+task controllable void sent_ack();
+
+endtemplate

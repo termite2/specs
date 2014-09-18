@@ -1,0 +1,14 @@
+/* Main template: instantiates and connects device, driver, and OS templates.
+ */
+
+import <os.tsl>
+import <16450.tsl>
+import <drv.tsl>
+
+template main
+
+instance uart_linux           os  (drv, dev);
+instance uart_16450           dev (os);
+instance uart_linux_drv       drv (dev, os);
+
+endtemplate

@@ -1,0 +1,173 @@
+import <class.tsl>
+
+template uart_16450(uart_os os)
+
+derive uart_dev;
+
+uint<8> rbr;
+uint<8> thr;
+uint<8> ier = 8'h0;
+uint<8> lcr;
+uint<8> mcr;
+uint<8> lsr = 8'h0;
+uint<8> msr;
+uint<8> scr;
+uint<8> dll;
+uint<8> dlm;
+
+bool transmit_pending = false;
+
+const uint<8> A0 = 8'h00;
+const uint<8> A1 = 8'h01;
+const uint<8> A2 = 8'h02;
+const uint<8> A3 = 8'h03;
+const uint<8> A4 = 8'h04;
+const uint<8> A5 = 8'h05;
+const uint<8> A6 = 8'h06;
+const uint<8> A7 = 8'h07;
+
+task controllable void write8_A0(uint<8> val){
+    if (lcr[7:7] == 1) {
+        dll = val; 
+        os.config_updated();
+    } else {
+        thr = val;
+        transmit_pending = true;
+        lsr[5:5] = 0;
+    };
+};
+
+task controllable void write8_A1(uint<8> val){
+    if (lcr[7:7] == 1) {
+        dlm = val; 
+        os.config_updated();
+    } else {
+        ier[0:3] = val[0:3];
+    };
+};
+
+task controllable void write8_A3(uint<8> val){
+    if((lcr[0:1] == val[0:1]) && (lcr[2:2] == val[2:2]) && (lcr[3:3] == val[3:3] && (lcr[4:4] == val[4:4]))){
+        lcr = val; 
+    } else {
+        lcr = val;
+        os.config_updated();
+    };
+};
+
+task controllable void write8_A4(uint<8> val){
+    mcr = val; 
+    os.config_updated();
+};
+
+task controllable void write8_A7(uint<8> val){
+    scr = val; 
+    os.config_updated();
+};
+
+task controllable uint<8> read8(uint<8> addr){
+    case (addr) {
+        A5: {
+            uint<8> tmp = lsr;
+
+            lsr[0:0] = 0;
+            lsr[1:1] = 0;
+            lsr[2:2] = 0;
+            lsr[3:3] = 0;
+            lsr[4:4] = 0;
+
+            return tmp;
+        };
+
+        A0: {
+            if(lcr[7:7] == 1){
+                return dll;
+            } else {
+                lsr[0:0] = 0;
+                return rbr;
+            };
+        };
+
+        A3: {
+            return lcr;
+        };
+
+        A2: {
+            uint<8> tmp2 = 8'h0;
+            if(ier[0:0] == 1 && lsr[0:0] == 1){
+                tmp2[0:2] = 3'h4;
+            } else if (ier[1:1] == 1 && lsr[5:5] == 1) {
+                tmp2[0:2] = 3'h2;
+                lsr[5:5] = 0;
+            } else {
+                tmp2[0:2] = 3'h1;
+            };
+            return tmp2;
+        };
+        
+        default: {
+            return 8'h0;
+        };
+    };
+};
+
+task void byte_recvd(uint<8> byte, uint<1> parity_err, uint<1> framing_err, uint<1> breakk){
+    lsr[0:0] = 1;
+    lsr[1:1] = lsr[0:0];
+    lsr[2:2] = parity_err;
+    lsr[3:3] = framing_err;
+    lsr[4:4] = breakk;
+
+    rbr = byte;
+};
+
+process send_fsm {
+    forever {
+        wait(transmit_pending == true);
+        transmit_pending = false;
+        pause;
+        lsr[5:5] = 1;
+        os.byte_sent(thr);
+    };
+};
+
+function wl_t get_word_length () {
+    case (lcr[0:1]) {
+        2'd0 : return bits5;
+        2'd1 : return bits6;
+        2'd2 : return bits7;
+        2'd3 : return bits8;
+    };
+    //TODO: why do I need this?
+    return bits8;
+};
+
+function uint<1> get_stop_bit () {
+    return lcr[2:2];
+};
+
+function uint<1> get_parity () {
+    return lcr[3:3];
+};
+
+function uint<1> get_parity_even () {
+    return lcr[4:4];
+};
+
+function uint<1> get_stick_parity () {
+    return lcr[5:5];
+};
+
+function uint<16> get_divisor () {
+    uint<16> res;
+    res[0:7]  = dll;
+    res[8:15] = dlm;
+    return res;
+};
+
+function bool int_pending(){
+    return (lsr[5:5] == 1 && ier[1:1] == 1) || (lsr[0:0] == 1 && ier[0:0] == 1);
+};
+
+endtemplate
+

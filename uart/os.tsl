@@ -1,0 +1,124 @@
+import <class.tsl>
+
+template uart_linux(uart_drv drv, uart_dev dev)
+
+derive uart_os;
+
+wl_t wl;
+uint<1> stop_bit;
+uint<1> parity;
+uint<1> parity_even;
+uint<1> stick_parity;
+uint<16> divisor;
+
+typedef enum {
+    send_idle,
+    send_requested,
+    send_ack
+} send_state_t;
+
+send_state_t send_state = send_idle;
+
+uint<8> dat;
+uint<1> pe;
+uint<1> fe;
+uint<1> bk;
+
+bool recv_flag = false;
+
+process pos {
+    drv.probe();
+    forever {
+        pause;
+        if(dev.int_pending()) {
+            drv.isr();
+        } else {
+            choice {
+                configure();
+                send();
+                //recv();
+                {};
+            };
+        };
+    };
+};
+
+goal recv = recv_flag == false;
+
+process recv_p {
+    forever {
+        if(send_state != send_ack){
+            choice {
+                {
+                    dat = *;
+                    pe  = *;
+                    fe  = *;
+                    bk  = *;
+
+                    recv_flag = true;
+
+                    byte_recvd : {
+                        dev.byte_recvd(dat, pe, fe, bk);
+
+                        wait(recv_flag == false);
+                    };
+                };
+                {};
+            };
+        };
+        pause;
+    };
+};
+
+task controllable void recv_ack(uint<8> data){
+    recv_flag = false;
+    assert(@byte_recvd);
+    assert(data == dat);
+};
+
+task void configure() {
+    wl           = *;
+    stop_bit     = *;
+    parity       = *;
+    parity_even  = *;
+    stick_parity = *;
+    divisor      = *;
+
+    configure_in_progress: drv.configure (wl, stop_bit, parity, parity_even, stick_parity, divisor);
+
+    assert (dev.get_word_length() == wl);
+    assert (dev.get_stop_bit()    == stop_bit);
+    assert (dev.get_parity()      == parity);
+    assert (dev.get_parity_even() == parity_even);
+    assert (dev.get_divisor()     == divisor);
+};
+
+procedure void config_updated() {
+    assert (@configure_in_progress);
+};
+
+//TODO: this goal can not be satisfied because it is always possible for another byte to be received before we read the IIR register. As a result, we always see the cause of the interrupt as the received byte and never ack the transmission.
+goal idle = send_state == send_idle;
+
+task void send() {
+    if(send_state == send_idle){
+        data = *;
+
+        send_state = send_requested;
+
+        drv.send (data);
+    };
+};
+
+procedure void byte_sent(uint<8> dat){
+    assert (send_state == send_requested);
+    assert (data == dat);
+    send_state = send_ack;
+};
+
+task controllable void sent_ack(){
+    assert (send_state == send_ack);
+    send_state = send_idle;
+};
+
+endtemplate
