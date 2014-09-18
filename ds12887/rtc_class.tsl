@@ -1,0 +1,111 @@
+/* Declaration of interfaces between the driver, the device, and the OS
+ */
+
+/* Data types
+ */
+
+// Time
+typedef struct {
+    uint<6> tm_sec;
+    uint<6> tm_min;
+    uint<5> tm_hour;
+    uint<5> tm_mday;
+    uint<4> tm_mon;
+    uint<7> tm_year;
+} rtc_time;
+
+// Alarm
+typedef struct {
+    uint<6> seconds;
+    uint<6> minutes;
+    uint<5> hours;
+} rtc_wkalarm;
+
+// Clock mode: binary/binary-coded decimal
+typedef enum {
+    rtc_binary,
+    rtc_bcd
+} rtc_data_mode;
+
+// 24/12 hour mode
+typedef enum {
+   rtc_24,
+   rtc_12
+} rtc_hrs_mode;
+
+/* Virtual device interface.
+ *
+ * Consists of methods invoked by the OS in order to query current device 
+ * state.  These do not correspond to actual runtime interactions, but are
+ * only needed as part of correctness specification.
+ */
+template rtc_dev
+
+function bool is_on();
+function bool is_running();
+function rtc_data_mode data_mode();
+function rtc_hrs_mode hrs_mode();
+function bool is_irq_asserted ();
+function rtc_time get_time();
+function rtc_wkalarm get_alarm();
+endtemplate
+
+/* Methods exported by the driver to the OS.
+ */
+template rtc_drv
+
+// Time value requested by the OS.  This is needed so that we can specify that 
+// the time set in the device is equal to what was requested by the OS.
+export rtc_time req_time;
+
+// Alarm time requested by the OS
+export rtc_wkalarm req_alarm;
+
+export bool alarm_irq_enabled;
+
+// initialise the device
+task uncontrollable void probe();
+
+// read current time
+task uncontrollable rtc_time read_time();
+// set time
+task uncontrollable void set_time(rtc_time tm);    
+
+// read alarm value from the device
+task uncontrollable rtc_wkalarm read_alarm();
+// set alarm value in the device
+task uncontrollable void set_alarm(rtc_wkalarm alm);
+
+// enable alarm notification
+task uncontrollable void alarm_irq_enable(bool on);
+
+// IRQ handler
+task uncontrollable void irq ();
+
+endtemplate
+
+/* Methods exported by the OS to the device and the driver
+ */
+template rtc_os
+
+/* (Virtual) callbacks from the device to the OS */
+
+// Invoked when time is being updated by the driver
+procedure void time_updated();
+// Regular timer increment
+procedure void tick();
+// Alarm updated by the driver
+procedure void alarm_updated();
+// Device configuration has changed.
+procedure void config_updated();
+
+/* Real OS callbacks */
+
+// alarm notification
+task controllable void alarm();
+// Called by the driver to enable delivery of IRQs from the device.  Note that 
+// this is different from enabling IRQ generation in the device itself, which 
+// the driver does by setting appropriate device registers.
+task controllable void irq_enable ();
+
+endtemplate

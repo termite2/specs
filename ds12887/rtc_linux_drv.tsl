@@ -1,0 +1,18 @@
+import <rtc_class.tsl>
+import <ds12887.tsl>
+
+template rtc_linux_drv(rtc_os os)
+
+derive rtc_drv;
+
+task uncontrollable rtc_time read_time();
+task uncontrollable void set_time(rtc_time tm);    
+
+task uncontrollable rtc_wkalarm read_alarm();
+task uncontrollable void set_alarm(rtc_wkalrm alm);
+
+task uncontrollable void alarm_irq_enable(bool on);
+
+
+
+endtemplate

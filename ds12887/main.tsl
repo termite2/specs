@@ -1,0 +1,14 @@
+/* Main template: instantiates and connects device, driver, and OS templates.
+ */
+
+import <rtc_linux.tsl>
+import <ds12887.tsl>
+import <ds12887_linux_drv.tsl>
+
+template main
+
+instance rtc_linux         os  (drv, dev);
+instance ds12887           dev (os);
+instance ds12887_linux_drv drv (os, dev);
+
+endtemplate

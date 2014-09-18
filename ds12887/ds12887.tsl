@@ -1,0 +1,252 @@
+/* DS12887 Real-time clock model.
+ * The model is simplified in several ways:
+ * - The clock increment algorithm is not modelled, as it is not relevant to the driver.
+ *   Instead the model just picks a new time value non-deterministially on each tick.
+ * - BCD (binary-coded decimal) mode is not modelled, as Termite cannot deal with 
+ *   arithmetic yet.
+ * - Periodic interrupts are not modelled, because I am lazy.
+ *
+ * See device datasheet for detailed explanation of device registers and it operation.
+ */
+
+import <rtc_class.tsl>
+
+template ds12887(rtc_os os)
+
+derive rtc_dev;
+
+/* Device register file
+ */
+
+// Alarm and time registers
+uint<8> reg_seconds;
+uint<8> reg_alarm_seconds;
+uint<8> reg_minutes;
+uint<8> reg_alarm_minutes;
+uint<8> reg_hours;
+uint<8> reg_alarm_hours;
+uint<8> reg_date;
+uint<8> reg_month;
+uint<8> reg_year;
+
+// Control registers
+uint<8> reg_control_a;
+const uint<3> REG_A_UIP  = 3'd7;
+
+uint<8> reg_control_b;
+const uint<3> REG_B_SET  = 3'd7;
+const uint<3> REG_B_AIE  = 3'd5;
+const uint<3> REG_B_DM   = 3'd2;
+const uint<3> REG_B_2412 = 3'd1;
+
+uint<7> reg_control_c;
+
+// The IRQF field of control register C is not a latched register.
+// Its value is computed based on other field of this register.
+// Hence we model it as a wire.
+wire uint<1> reg_control_c_IRQF = cond {
+                                        (reg_control_c[REG_C_AF:REG_C_AF] == 1'b1) && (reg_control_b[REG_B_AIE:REG_B_AIE] == 1'b1) : 1'b1;
+                                        default: 1'b0;
+                                  };
+const uint<3> REG_C_IRQF = 3'd7;
+const uint<3> REG_C_AF   = 3'd5;
+
+const uint<3> OSCILLATOR_ENABLED = 3'b010;
+const uint<2> ALARM_WILDCARD     = 2'b11;
+
+// Register read/write logic
+task controllable void write_reg_control_a(uint<8> val) {
+    reg_control_a[0:6] = val[0:6];
+    // Notify the OS that device configuration has changed.  
+    // This does not correspond to an actual run-time interaction,
+    // but is needed for correctness specification.
+    os.config_updated();
+};
+
+task controllable void write_reg_control_b(uint<8> val) {
+    reg_control_b = val;
+    if (val[REG_B_SET:REG_B_SET] == 1'b1)
+        reg_control_a[REG_A_UIP:REG_A_UIP] = 0;
+    os.config_updated();
+};
+
+task controllable uint<8> read_reg_control_b() {
+    return reg_control_b;
+};
+
+task controllable uint<8> read_reg_control_c() {
+    uint<8> val;
+    val[REG_C_IRQF:REG_C_IRQF] = reg_control_c_IRQF;
+    val[0:6]        = reg_control_c;
+    reg_control_c   = 7'd0;
+    return val;
+};
+
+task controllable void write_reg_seconds(uint<8> val) {
+    reg_seconds = val;
+    // Notify the OS that a new time value has been set in
+    // the device by the driver
+    os.time_updated();
+};
+
+task controllable uint<8> read_reg_seconds() {
+    return reg_seconds;
+};
+
+task controllable void write_reg_minutes(uint<8> val) {
+    reg_minutes = val;
+    os.time_updated();
+};
+
+task controllable uint<8> read_reg_minutes() {
+    return reg_minutes;
+};
+
+task controllable void write_reg_hours(uint<8> val) {
+    reg_hours = val;
+    os.time_updated();
+};
+
+task controllable uint<8> read_reg_hours() {
+    return reg_hours;
+};
+
+task controllable void write_reg_date(uint<8> val) {
+    reg_date = val;
+    os.time_updated();
+};
+
+task controllable uint<8> read_reg_date() {
+    return reg_date;
+};
+
+task controllable void write_reg_month(uint<8> val) {
+    reg_month = val;
+    os.time_updated();
+};
+
+task controllable uint<8> read_reg_month() {
+    return reg_month;
+};
+
+task controllable void write_reg_year(uint<8> val) {
+    reg_year = val;
+    os.time_updated();
+};
+
+task controllable uint<8> read_reg_year() {
+    return reg_year;
+};
+
+task controllable void write_reg_alarm_seconds(uint<8> val) {
+    reg_alarm_seconds = val;
+    os.alarm_updated();
+};
+
+task controllable uint<8> read_reg_alarm_seconds() {
+    return reg_alarm_seconds;
+};
+
+task controllable void write_reg_alarm_minutes(uint<8> val) {
+    reg_alarm_minutes = val;
+    os.alarm_updated();
+};
+
+task controllable uint<8> read_reg_alarm_minutes() {
+    return reg_alarm_minutes;
+};
+
+task controllable void write_reg_alarm_hours(uint<8> val) {
+    reg_alarm_hours = val;
+    os.alarm_updated();
+};
+
+task controllable uint<8> read_reg_alarm_hours() {
+    return reg_alarm_hours;
+};
+
+// Periodic clock update happens in two phases.  During the first phase, 
+// the update-in-progrss (UIP) flag is set.  During the second phase, the
+// time value is incremented and the UIP bit is reset to 0.
+process ptick {
+    forever {
+        // TODO: correct clock arithmetics
+        wait((reg_control_a[4:6] == OSCILLATOR_ENABLED) && (reg_control_b[REG_B_SET:REG_B_SET] == 1'b0));
+        if (reg_control_a[REG_A_UIP:REG_A_UIP] == 1'b0) {
+            reg_control_a[REG_A_UIP:REG_A_UIP] = 1'b1;
+        } else {
+            // We don't model the actual clock arithmetic, but instead choose a new clock
+            // value non-deterministically.  This is a conservative abstraction, as it still 
+            // contains the actual clock behaviour.
+            reg_seconds = *;
+            reg_minutes = *;
+            reg_hours   = *;
+            reg_date    = *;
+            reg_month   = *;
+            reg_year    = *;
+            // Set alarm flag to true if the new time value is equal to the value programmed in
+            // alarm registers.
+            if (((reg_seconds[0:5] == reg_alarm_seconds[0:5]) || (reg_alarm_seconds[6:7] == ALARM_WILDCARD)) &&
+                ((reg_minutes[0:5] == reg_alarm_minutes[0:5]) || (reg_alarm_minutes[6:7] == ALARM_WILDCARD)) &&
+                ((reg_hours[0:4] == reg_alarm_hours[0:4])     || (reg_alarm_hours[6:7] == ALARM_WILDCARD))) {
+                reg_control_c[REG_C_AF:REG_C_AF] = 1;
+            };
+            reg_control_a[REG_A_UIP:REG_A_UIP] = 0;
+            // Notify OS that time has advanced through a virtual callback.
+            os.tick();
+        };
+    };
+};
+
+/* Virtual methods invoked by the OS to query device state.
+ * Note that these are declared as functions, which means that
+ * they complete instantaneously and do not modify device state.
+ */ 
+
+function rtc_time get_time() {
+    // TODO: year conversion and BCD format
+    return rtc_time { .tm_sec  = reg_seconds[0:5]
+                    , .tm_min  = reg_minutes[0:5]
+                    , .tm_hour = reg_hours[0:4]
+                    , .tm_mday = reg_date[0:4]
+                    , .tm_mon  = reg_month[0:3]
+                    , .tm_year = reg_year[0:6]
+                    };
+};
+
+function rtc_wkalarm get_alarm() {
+    return rtc_wkalarm { .seconds = reg_alarm_seconds[0:5]
+                       , .minutes = reg_alarm_minutes[0:5]
+                       , .hours   = reg_alarm_hours[0:4]
+                       };
+};
+
+function bool is_on() {
+    return (reg_control_a[4:6] == OSCILLATOR_ENABLED);
+};
+
+function bool is_running() {
+    return (reg_control_b[REG_B_SET:REG_B_SET] == 1'b0);
+};
+
+function bool is_irq_asserted () {
+    return (reg_control_c_IRQF == 1);
+};
+
+function rtc_data_mode data_mode() {
+    if (reg_control_b[REG_B_DM:REG_B_DM] == 1) {
+        return rtc_binary;
+    } else {
+        return rtc_bcd;
+    };
+};
+
+function rtc_hrs_mode hrs_mode() {
+    if (reg_control_b[REG_B_2412:REG_B_2412] == 1) {
+        return rtc_24;
+    } else {
+        return rtc_12;
+    };
+};
+
+endtemplate

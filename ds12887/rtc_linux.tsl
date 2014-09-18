@@ -1,0 +1,211 @@
+/* A simplified version of the real-time clock driver interface in Linux.
+ */
+
+import <rtc_class.tsl>
+
+template rtc_linux(rtc_drv drv, rtc_dev dev)
+
+derive rtc_os;
+
+/* Variables that model the state of the driver-OS interface
+ */
+
+// Models the state of the I/O bus connecting the device to the host.
+// This bus is controlled by the OS, hence this variable is part of the
+// OS model.
+// IRQ delivery is initially disabled.
+bool irq_enabled = false;
+
+// Set to true when the time value in the device matches what was requested by the OS.
+export bool correct_time;
+
+// Current state of the alarm feature of the clock
+typedef enum {
+    alarm_off,          // alarm time is not set and no alarm notifications are generated
+    alarm_set,          // alarm time is set, but no notifications are generated
+    alarm_maybe_due,
+    alarm_due           // alarm time has been reached.  The driver _must_ notify the OS at this point
+} alarm_phase;
+
+alarm_phase alarm_state = alarm_off;
+
+// A correct driver must satisfy safety and liveness conditions.  Safety 
+// conditions are specified using assertions throughout the spec.  Liveness
+// conditions are given in the form of goal conditions, that must be 
+// satisfied infinitely often along any run of the driver.
+// 
+// The following goal prevents alarm_state from being alarm_due forever, 
+// i.e., whenever the alarm is due, the driver must eventually notify the OS.
+goal alarm_goal = alarm_state != alarm_due;
+
+/* The OS process simulates how the OS invokes the driver.
+ */ 
+process pos {
+    // initialise the driver first
+    probe();
+    forever {
+        pause;
+        // If there is an interrupt signal pending, and interrupt delivery is enabled, 
+        // deliver the interrupt to the driver.
+        if (dev.is_irq_asserted () && irq_enabled) {
+            drv.irq();
+        } else {
+            // .. otherwise, non-deterministically choose the type of I/O 
+            // request to the driver
+            choice {
+                set_time();
+                read_time();
+                set_alarm();
+                read_alarm();
+                alarm_irq_enable();
+                {}; // .. or do nothing.  This is needed to specify that the driver
+                    // cannot expect that one of its functions will be called eventually,
+                    // else we end up with synthesised strategies that postpone some
+                    // actions until the next invocation.
+            };
+        };
+    };
+};
+
+// Wrapper around invocation of the probe() driver entry point.  Makes sure that
+// the entry point does the right thing.
+task void probe() {
+    // Raise the flag indicating that probe is in progress.  This flag is checked
+    // in the config_updated() procedure below.
+    //probe_in_progress = true;
+    // call the driver
+    probe_in_progress: drv.probe();
+    //probe_in_progress = false;
+    // Check that the device is configured correctly by probe() 
+    assert (dev.is_on() &&                      // the device is on
+            dev.is_running() &&                 // time is being updated
+            (dev.data_mode() == rtc_binary) &&  // the clock is configured in binary mode
+            (dev.hrs_mode() == rtc_24));        // 24-hour scale is used (not am/pm)
+};
+
+// This is a virtual callback invoked by the device whenever its internal configuration
+// changes.  It does not correspond to an actual runtime interaction and is only needed
+// to specify correct driver behaviour.
+procedure void config_updated() {
+    // Unless initialisation is in progress, the driver is not allowed to power down the 
+    // device or change its mode of operation.
+    if (!@probe_in_progress) {
+        assert (dev.is_on() && (dev.data_mode() == rtc_binary) && (dev.hrs_mode() == rtc_24));
+        // Clock updating can be temporarily stopped during the set_time operation, 
+        // but not anywhere else
+        if (!@set_time_in_progress)
+            assert (dev.is_running());
+    };
+};
+
+// Wrapper around invocation of the set_time entry point.
+task void set_time() {
+    // non-deterministically pick a new time value
+    correct_time = false;
+    // call the driver
+    set_time_in_progress: drv.set_time(*);
+    // The correct_time variable is set in the time_updated callback.
+    // It must be true before the set_time() operation completes.
+    // NOTE: we cannot just check that current time is equal to req_time at
+    // this point, because the clock could have advanced after the correct 
+    // time was set. Hence we perform this check in the time_updated callback
+    // below.
+    assert (correct_time);
+    // the config_updated callback above allows the clock update to be stopped
+    // when set_time_in_progress is true.  However, it must be reenabled before
+    // this operation completes.
+    assert (dev.is_running());
+};
+
+// Virtual callback invoked whenever the current time value in the device gets modified 
+// by the software (does not get called for periodic clock updates).  
+procedure void time_updated() {
+    // Software is only allowed to modify time during the set_time operation.
+    assert (@set_time_in_progress);
+    // Check if the time in the device is equal to the time value requested by the OS.
+    // set_time is a non-atomic operation, and can modify the current time value several
+    // times before finally setting the correct time.  As long as the final value is 
+    // correct, the corresponding check in set_time() will be satisfied.
+    correct_time = (dev.get_time() == drv.req_time);
+};
+
+// Virtual callback invoked on each periodic clock update
+procedure void tick() {
+    // If the hardware clock hit the alarm time, and alarm notifications
+    // are enabled, update alarm_state to alarm_due.  
+    if ((dev.get_time().tm_sec == drv.req_alarm.seconds) && 
+        (dev.get_time().tm_min == drv.req_alarm.minutes) &&
+        (dev.get_time().tm_hour == drv.req_alarm.hours) &&
+        (alarm_state == alarm_set) && drv.alarm_irq_enabled) {
+        if (@irq_enable_in_progress) {
+            alarm_state = alarm_maybe_due;
+        } else {
+            alarm_state = alarm_due;
+        };
+    };
+};
+
+// Wrapper around invocation of the set_alarm entry point.
+task void set_alarm() {
+    // non-deterministically pick alarm value
+    set_alarm_in_progress: drv.set_alarm (*);
+    // Verify that alarm value in the device matches what we requested.
+    assert (dev.get_alarm() == drv.req_alarm);
+    alarm_state = alarm_set;
+};
+
+// Invoked whenever the value of the alarm time in the device is modified 
+// by the software.
+procedure void alarm_updated() {
+    // make sure that alarm time does not change outside the set_alarm operation.
+    assert (@set_alarm_in_progress);
+};
+
+// Wrapper around invocation of the read_time entry point
+task void read_time () {
+    // Simply call driver method.  Specifying correctness of this operation
+    // actually requires reasoning about time, which cannot be done using our 
+    // current formalism.  So we just trust our manual implementation to be 
+    // correct.
+    rtc_time tm = drv.read_time ();
+};
+
+// Wrapper around invocation of the read_alarm entry point
+task void read_alarm () {
+    rtc_wkalarm alm = drv.read_alarm ();
+    // Check that the value returned by the method matches the actual alarm value
+    // in the device.
+    assert (alm == dev.get_alarm());
+};
+
+// Wrapper around invocation of the read_alarm entry point
+task void alarm_irq_enable () {
+    bool on;
+    // Don't call the driver if alarm time has not been set yet.
+    if (alarm_state == alarm_off) return;
+    // Non-deterministically choose whether we want to enable or disable notifications.
+    alarm_state = alarm_set;
+    irq_enable_in_progress: drv.alarm_irq_enable (*);
+};
+
+/* The following two methods are OS callbacks invoked by the driver.
+ */ 
+
+// Called by the driver to enable delivery of IRQs from the device.  
+// Note that this is different from enabling IRQ generation in the 
+// device itself, which the driver does by setting appropriate 
+// device registers.
+task controllable void irq_enable () {
+    irq_enabled = true;
+};
+
+// Called by the driver to notify the OS about alarm.
+task controllable void alarm () {
+    // Can only be called when alarm is due.
+    assert ((alarm_state == alarm_due) || (alarm_state == alarm_maybe_due));
+    // Reset alarm state machine.
+    alarm_state = alarm_set;
+    drv.alarm_irq_enabled = false;
+};
+
+endtemplate

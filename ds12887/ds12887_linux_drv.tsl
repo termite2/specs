@@ -1,0 +1,69 @@
+/* Driver template to be filled out by the synthesiser.
+ * Some of the methods are partially or completely implemented either because
+ * we cannot synthesise them automatically yet (due to the partial information
+ * problem) our because we want the code to have a particular structure, as
+ * in case of the irq() method.
+ */
+
+import <rtc_class.tsl>
+import <rtc_linux.tsl>
+import <ds12887.tsl>
+
+template ds12887_linux_drv(rtc_linux os, ds12887 dev)
+
+derive rtc_drv;
+
+task uncontrollable void probe()
+{
+    ...;
+};
+
+task uncontrollable rtc_time read_time()
+{    
+    // todo: disable interrupts and wait for UIP=0
+    return rtc_time { .tm_sec  = dev.read_reg_seconds()[0:5]
+                    , .tm_min  = dev.read_reg_minutes()[0:5]
+                    , .tm_hour = dev.read_reg_hours()[0:4]
+                    , .tm_mday = dev.read_reg_date()[0:4]
+                    , .tm_mon  = dev.read_reg_month()[0:3]
+                    , .tm_year = dev.read_reg_year()[0:6]
+                    };
+};
+
+task uncontrollable void set_time(rtc_time tm)
+{
+    req_time = tm;
+    ...;
+};    
+
+task uncontrollable rtc_wkalarm read_alarm()
+{
+    return rtc_wkalarm { .seconds = dev.read_reg_alarm_seconds()[0:5]
+                       , .minutes = dev.read_reg_alarm_minutes()[0:5]
+                       , .hours   = dev.read_reg_alarm_hours()[0:4]
+                       };
+};
+
+task uncontrollable void set_alarm(rtc_wkalarm alm)
+{
+    req_alarm = alm;
+    ...;
+    alarm_irq_enabled = false;
+};
+
+task uncontrollable void alarm_irq_enable (bool on)
+{
+    ...;
+    alarm_irq_enabled = on;
+};
+
+task uncontrollable void irq ()
+{
+    uint<8> cause = dev.read_reg_control_c ();
+    dev.write_reg_control_b(8'b00000110);
+    if (cause[ds12887::REG_C_AF : ds12887::REG_C_AF] == 1'b1) {
+        ...;
+    };
+};
+
+endtemplate
