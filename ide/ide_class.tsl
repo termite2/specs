@@ -1,0 +1,25 @@
+template ide_os
+
+procedure void write_sectors(uint<8> lba0, uint<8> lba1, uint<8> lba2, uint<8> lba3, uint<8> lba4, uint<8> lba5, uint<8> sectors0, uint<8> sectors1, uint<32> buf, bool xfer_error);
+procedure void read_sectors(uint<8> lba0, uint<8> lba1, uint<8> lba2, uint<8> lba3, uint<8> lba4, uint<8> lba5, uint<8> sectors0, uint<8> sectors1, uint<32> buf, bool xfer_error);
+procedure void reset();
+procedure void write_cache_enabled();
+procedure void write_cache_enable_failed();
+procedure void write_cache_disabled();
+procedure void write_cache_disable_failed();
+procedure void udma_enabled(uint<3> udma_mode);
+procedure void udma_enable_failed(uint<3> udma_mode);
+task controllable void write_ack();
+task controllable void read_ack();
+
+endtemplate
+
+template ide_drv
+
+task uncontrollable void handle_irq();
+task uncontrollable void probe ();
+task uncontrollable void write_cache_enable ();
+task uncontrollable void write(uint<48> lba, uint<16> sectors, uint<32> buf);
+task uncontrollable void read(uint<48> lba, uint<16> sectors, uint<32> buf);
+
+endtemplate

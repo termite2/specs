@@ -1,0 +1,12 @@
+import<ide_dev.tsl>
+import<ide_class.tsl>
+import<l4_ide.tsl>
+import<l4_ide_drv.tsl>
+
+template main
+
+instance l4_ide_os  os(drv, dev);
+instance ide_dev    dev(os);
+instance l4_ide_drv drv(os, dev);
+
+endtemplate

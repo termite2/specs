@@ -1,0 +1,613 @@
+import <l4_ide.tsl>
+
+template ide_dev(ide_os os)
+
+const uint<8> CMD_READ_DMA      = 8'hc8;
+const uint<8> CMD_READ_DMA_EXT  = 8'h25;
+const uint<8> CMD_WRITE_DMA     = 8'hca;
+const uint<8> CMD_WRITE_DMA_EXT = 8'h35;
+const uint<8> CMD_SET_FEATURE   = 8'hef;
+
+const uint<8> FEAT_WC           = 8'h02;
+const uint<8> FEAT_NWC          = 8'h82;
+const uint<8> FEAT_XFR_MODE     = 8'h03;
+
+const uint<5> XM_ULTRA_DMA      = 5'h8;
+
+uint<3> transfer_mode = 3'd0;
+bool pioDMA           = false;
+bool wce              = false;
+
+typedef enum {
+    idle,
+    command,
+    reset_signal,
+    reset_ready
+} enum_stinternal;
+
+enum_stinternal stinternal = idle;
+
+typedef enum {
+    wait_bm_ready,
+    bm_read_prd,
+    bm_ready,
+    dma_read
+} enum_stdma_cmd;
+
+enum_stdma_cmd stdma_cmd = wait_bm_ready;
+
+typedef enum {
+    command_start,
+    dma_cmd,
+    set_features_cmd
+} enum_stcommand;
+
+enum_stcommand stcommand = command_start;
+
+// Command block registers  - These registers are the "taskfile"
+const uint<8> RCMD = 8'd0;
+
+// Visible registers
+
+const uint<8> REG_FEATURE0  = 8'd1;
+uint<8> reg_feature0 = 8'd0;      // @ 0x01
+
+const uint<8> REG_SECTORS   = 8'd2;
+uint<8> reg_sectors = 8'd0;       // @ 0x02  "sector count register";
+
+const uint<8> REG_LBA_LOW0  = 8'd3;
+uint<8> reg_lba_low0 = 8'd0;      // @ 0x03  "log block addr low byte";
+
+const uint<8> REG_LBA_MID0  = 8'd4;
+uint<8> reg_lba_mid0 = 8'd0;      // @ 0x04  "lba mid byte";
+
+const uint<8> REG_LBA_HIGH0 = 8'd5;
+uint<8> reg_lba_high0 = 8'd0;     // @ 0x05  "lba high byte";
+
+const uint<8> REG_DEV      = 8'd6;
+struct {
+    uint<5> dev_lbext;
+    uint<1> lba;
+} reg_dev;           // @ 0x06  "device register";
+
+const uint<8> REG_ERRCMD   = 8'd7;
+
+// Hidden Registers
+    
+//* sector extension for LBA48 */
+uint<8> reg_sectors1  = 8'd0;
+//* LBA extensions for LBA48 */
+uint<8> reg_lba_low1  = 8'd0;
+uint<8> reg_lba_mid1  = 8'd0;
+uint<8> reg_lba_high1 = 8'd0;
+//* Feature extension for LBA48 */
+uint<8> reg_feature1  = 8'd0;
+//* Error reg aliased to read access of feature reg */
+uint<8> reg_error     = 8'd0;
+uint<8> reg_command   = 8'd0;
+
+//* The control block - matches ICH10 definitions */
+const uint<8> RCTL    = 8'd1;
+
+const uint<8> REG_CTLSTAT  = 8'd2;
+
+struct {
+    uint<1> nIEN;
+    uint<1> SRST;
+    uint<1> HOB;
+} reg_control;
+
+init (reg_control.nIEN == 0 && reg_control.SRST == 0 && reg_control.HOB == 0);
+
+struct {
+    uint<1> ERR;
+    uint<2> obs;
+    uint<1> DRQ;
+    uint<1> bit4;
+    uint<1> DF;
+    uint<1> DRDY;
+    uint<1> BSY;
+} reg_status;
+ 
+//* The DMA register bank */
+const uint<8> RDMA = 8'd2;
+
+const uint<8> REG_BM_COMMAND = 8'd0;
+struct {
+    uint<1> START;
+    uint<1> rW;
+} reg_bm_command; // @ 0x00  "bus-master command register";
+
+const uint<8> REG_BM_STATUS  = 8'd2;
+struct {
+    uint<1> ACTV;
+    uint<1> ERR;
+    uint<1> IRQ;
+    uint<2> resv;
+    uint<1> DRV0CAP;
+    uint<1> DRV1CAP;
+    uint<1> SMPLX;       
+} reg_bm_status;  // @ 0x02  "bus-master status register";
+
+init(reg_bm_status.IRQ == 0);
+
+const uint<8> REG_BM_PRD     = 8'd4;
+uint<32> reg_bm_prd = 32'd0;     // size 4 @ 0x04 "phys region descriptor ptr reg";
+    
+//storage location for fetched prd items of interest
+uint<32> buf_addr = 32'd0;
+uint<16> buf_sectors = 16'd0;
+uint<1>  read_prd = 1'd0;
+bool     prd_valid = false;
+
+//task controllable void write8(uint<8> bank, uint<8> addr, uint<8> val)
+//{
+//    case (bank) {
+//        RCMD:    rcmd_write8(addr,val);
+//        RCTL:    rctl_write8(addr,val);
+//        RDMA:    rdma_write8(addr,val);
+////        default: assert(false);
+//    };
+//};
+
+task controllable void write32(uint<8> bank, uint<8> addr, uint<32> val)
+{
+    case (bank) {
+        RDMA:    rdma_write32(addr,val);
+//        default: assert(false);
+    };
+};
+
+
+task controllable void fill_prd(uint<32> addr, uint<16> nsect) 
+{
+    buf_addr = addr;
+    buf_sectors = nsect;
+};
+
+
+task controllable void rcmd_write_feature0(uint<8> val) 
+{
+    reg_control.HOB = 0;
+    reg_feature1 = reg_feature0;
+    reg_feature0 = val;
+};
+
+task controllable void rcmd_write_sectors(uint<8> val) 
+{
+    reg_control.HOB = 0;
+    reg_sectors1 = reg_sectors;
+    reg_sectors  = val;
+};
+task controllable void rcmd_write_lba_low0(uint<8> val) 
+{
+    reg_control.HOB = 0;
+    reg_lba_low1 = reg_lba_low0;
+    reg_lba_low0 = val;
+};
+
+task controllable void rcmd_write_lba_mid0(uint<8> val) 
+{
+    reg_control.HOB = 0;
+    reg_lba_mid1 = reg_lba_mid0;
+    reg_lba_mid0 = val;
+};
+
+task controllable void rcmd_write_lba_high0(uint<8> val) 
+{
+    reg_control.HOB = 0;
+    reg_lba_high1 = reg_lba_high0;
+    reg_lba_high0 = val;
+};
+
+task controllable void rcmd_write_dev(uint<8> val) 
+{
+    reg_dev.dev_lbext = val[0:4];
+    case (val[6:6]) {
+        0: reg_dev.lba       = 0;
+        1: reg_dev.lba       = 1;
+    };
+};
+
+task controllable void rcmd_write_errcmd(uint<8> val) 
+{
+    // clear int_pending if not busy and no data requests pending
+    if ((reg_status.BSY == 0) && (reg_status.DRQ == 0))
+        clr_intrq();
+    assert (stcommand == command_start);
+    reg_command = val;
+    stinternal = command;
+    if (val == CMD_SET_FEATURE) {
+        stcommand  = set_features_cmd;
+    } else if ((val == CMD_READ_DMA_EXT) || (val == CMD_WRITE_DMA_EXT)) {
+        stcommand = dma_cmd;
+    };
+};
+
+task controllable void rctl_write8(uint<8> addr, uint<8> val)
+{
+    case (addr) {
+        REG_CTLSTAT: {    // clear int_pending if not busy and no data requests pending
+                          if ((reg_status.BSY == 0) && (reg_status.DRQ == 0)) {
+                              reg_bm_status.IRQ = 0;
+                          };
+                          // now write
+                          case (val[1:1]) {
+                              0: reg_control.nIEN = 0;
+                              1: reg_control.nIEN = 1;
+                          };
+                          case (val[7:7]) {
+                              0: reg_control.HOB  = 0;
+                              1: reg_control.HOB  = 1;
+                          };
+
+                          if (((reg_control.SRST == 0) && (val[2:2] == 1'd1)) ||
+                              ((reg_control.SRST == 1) && (val[2:2] == 1'd0))) { 
+                              case (val[2:2]) {
+                                  0: reg_control.SRST = 0;
+                                  1: reg_control.SRST = 1;
+                              };
+                              if (val[2:2] == 1'd1)  {
+                                  pioDMA = false;
+                                  wce = true;
+                                  stinternal = reset_ready;
+                                  //srst_timer_signalled = false;
+                              } else {
+                                  if (stinternal == reset_ready) {
+                                      reg_status.BSY  = 1'b0;
+                                      reg_status.DRDY = 1'b1;
+                                      reg_status.DF   = 1'b0;
+                                      reg_status.DRQ  = 1'b0;
+                                      reg_status.ERR  = 1'b0;
+
+                                      pioDMA = false;
+                                      wce = true;
+                                      reg_feature0 = 8'd0;
+                                      reg_sectors = 8'd0;
+                                      stinternal = idle;
+                                      os.reset();
+                                  };
+                              };
+                          };
+                     };
+//        default:     assert (false);
+    };
+};
+
+task controllable void rdma_write_status(uint<8> val)
+{   
+    if (val[1:1] == 1'b1) reg_bm_status.ERR = 0;
+    if (val[2:2] == 1'b1) reg_bm_status.IRQ = 0;
+    case (val[5:5]) {
+        0: reg_bm_status.DRV0CAP = 0;
+        1: reg_bm_status.DRV0CAP = 1;
+    };
+    case (val[6:6]) {
+        0: reg_bm_status.DRV1CAP = 0;
+        1: reg_bm_status.DRV1CAP = 1;
+    };
+};
+
+task controllable void rdma_write_command(uint<8> val)
+{
+    if ((stdma_cmd != wait_bm_ready) || (stcommand != dma_cmd)) {
+        dma_error();
+    } else {
+        // watch for 0->1 trans (edge)
+        if ((reg_bm_command.START == 0) && (val[0:0] == 1'b1)) {
+            read_prd = 1'b1;
+            stdma_cmd = bm_read_prd;
+        };
+        case (val[0:0]) {
+            0: reg_bm_command.START = 0;
+            1: reg_bm_command.START = 1;
+        };
+    }; 
+    case (val[3:3]) {
+        0: reg_bm_command.rW = 0;
+        1: reg_bm_command.rW = 1;
+    };
+};
+
+procedure void rdma_write32(uint<8> addr, uint<32> val)
+{
+    case (addr) {        
+        REG_BM_PRD: {    if (stdma_cmd != wait_bm_ready) {
+                             dma_error();
+                         } else {
+                             reg_bm_prd = val;
+                             prd_valid  = true;
+                         }; 
+                    };
+//        default:    assert(false);
+    };
+};
+
+function bool int_pending(){
+    return reg_bm_status.IRQ == 1'b1;
+};
+
+procedure void set_intrq() {
+  reg_bm_status.IRQ = 1'b1;
+};
+
+procedure void clr_intrq() {
+    reg_bm_status.IRQ = 0;
+};
+
+procedure void dma_error() {
+    reg_bm_status.ERR  = 1;
+    reg_bm_status.ACTV = 0;
+    rdy();
+    nbsy();
+};
+
+procedure void reg_status_reset()  {
+    reg_status.BSY  = 1'b0;
+    reg_status.DRDY = 1'b1;
+    reg_status.DF   = 1'b0;
+    reg_status.DRQ  = 1'b0;
+    reg_status.ERR  = 1'b0;
+};
+
+
+procedure void bsy() {
+    reg_status.BSY = 1'd1;
+};
+
+procedure void nbsy() {
+    reg_status.BSY = 1'd0;
+};
+
+procedure void rdy() {
+    reg_status.DRDY = 1'd1;
+};
+
+procedure void nrdy() {
+    reg_status.DRDY = 1'd0;
+};
+
+procedure void drq() {
+    reg_status.DRQ = 1'd1;
+};
+
+procedure void ndrq() {
+    reg_status.DRQ = 1'd0;
+};
+
+
+/* Reset timer */
+
+
+bool srst_timer_signalled = true;
+
+procedure void srst_timer_asserted() {
+    srst_timer_signalled = false;
+};
+
+//process psrst_timer
+//{
+//    forever {
+//        wait (!srst_timer_signalled);
+//        srst_timer_signalled = true;
+//        clr_intrq();
+//        bsy();
+//        nrdy();
+//        stinternal = reset_ready;
+//    };
+//};
+
+
+
+/* set feature command */
+
+//process set_feature_fsm {
+//    forever {
+//        wait(stcommand == set_features_cmd);
+//
+//        case (reg_feature0) {
+//            FEAT_WC:  {
+//                wce = true;
+//                command_ok();
+//                os.write_cache_enabled();
+//            };
+//            FEAT_NWC: {
+//                wce = false;
+//                command_ok();
+//                os.write_cache_disabled();
+//            };
+//            FEAT_XFR_MODE:  {
+//                if (reg_sectors[3:7] == XM_ULTRA_DMA) {
+//                    transfer_mode = reg_sectors[0:2];
+//                    pioDMA = true;
+//                    command_ok();
+//                    os.udma_enabled(transfer_mode);
+//                }
+//                else {
+//                    pioDMA = false;
+//                    command_ok();
+//                    os.udma_enabled(3'd0);
+//                };
+//            };
+//        };
+//    };
+//};
+
+procedure void command_ok() {
+    reg_status.ERR = 1'b0;
+    reg_status.DF  = 1'b0;
+    reg_error      = 8'h0;    
+    command_complete();
+};
+
+procedure void command_err()  {
+    reg_status.ERR = 1'b0;
+    reg_error      = 8'h4;    
+    command_complete();
+};
+
+procedure void command_complete()  {
+    nbsy();
+    ndrq();
+    rdy();
+    set_intrq();
+    stinternal = idle;
+    stcommand = command_start;
+};
+
+/* DMA */
+
+//process dmastart {
+//    forever {
+//        wait (stdma_cmd == bm_read_prd);
+//        // dma started
+//        if (reg_bm_command.START == 1'b1) {
+//            if (((reg_bm_command.rW == 1'b1) && (reg_command != CMD_READ_DMA_EXT)) ||
+//                ((reg_bm_command.rW == 1'b0) && (reg_command != CMD_WRITE_DMA_EXT)) ||
+//                (reg_dev.lba != 1'b1) ||
+//                (reg_sectors != buf_sectors[0:7]) ||
+//                (reg_sectors1 != buf_sectors[8:15])) {
+//                dma_error();
+//            }
+//            else {
+//                stdma_cmd = bm_ready;
+//            };
+//        };
+//    };
+//};
+
+    //uint<48> bmlba;
+    //uint<16> bmsectors;
+
+
+//process bus_master {
+//
+//   forever {
+//        wait (stdma_cmd == bm_ready);
+//        bsy();
+//        drq();
+//        stdma_cmd = dma_read;
+//
+////        bmlba[40:47]    = reg_lba_high1;
+////        bmlba[32:39]    = reg_lba_mid1;
+////        bmlba[24:31]    = reg_lba_low1;
+////        bmlba[16:23]    = reg_lba_high0;
+////        bmlba[8:15]     = reg_lba_mid0;
+////        bmlba[0:7]      = reg_lba_low0;
+////        bmsectors[0:7]  = reg_sectors;
+////        bmsectors[8:15] = reg_sectors1;
+//
+//        reg_bm_status.ACTV = 0;
+//        stdma_cmd = wait_bm_ready;
+//
+//        choice {
+//            {
+//                if (reg_bm_command.rW == 1'b1) {
+//                    os.read_sectors(reg_lba_low0, reg_lba_mid0, reg_lba_high0, reg_lba_low1, reg_lba_mid1, reg_lba_high1, reg_sectors, reg_sectors1, buf_addr, false);
+//                } else {
+//                    os.write_sectors(reg_lba_low0, reg_lba_mid0, reg_lba_high0, reg_lba_low1, reg_lba_mid1, reg_lba_high1, reg_sectors, reg_sectors1, buf_addr, false);
+//                };
+//                command_ok();
+//            };
+//            {
+//                if (reg_bm_command.rW == 1'b1) {
+//                    os.read_sectors (reg_lba_low0, reg_lba_mid0, reg_lba_high0, reg_lba_low1, reg_lba_mid1, reg_lba_high1, reg_sectors, reg_sectors1, buf_addr, true);
+//                } else {
+//                    os.write_sectors(reg_lba_low0, reg_lba_mid0, reg_lba_high0, reg_lba_low1, reg_lba_mid1, reg_lba_high1, reg_sectors, reg_sectors1, buf_addr, true);
+//                };
+//                command_err();
+//            };
+//        };
+//    };
+//};
+
+process events {
+    forever {
+        wait ((stdma_cmd == bm_read_prd) || (stdma_cmd == bm_ready) || (!srst_timer_signalled) || (stcommand == set_features_cmd));
+        if (stdma_cmd == bm_read_prd) {
+            if (reg_bm_command.START == 1'b1) {
+                if (((reg_bm_command.rW == 1'b1) && (reg_command != CMD_READ_DMA_EXT)) ||
+                    ((reg_bm_command.rW == 1'b0) && (reg_command != CMD_WRITE_DMA_EXT)) ||
+                    (reg_dev.lba != 1'b1) ||
+                    (reg_sectors != buf_sectors[0:7]) ||
+                    (reg_sectors1 != buf_sectors[8:15])) {
+                    assert(false);
+                    dma_error();
+                }
+                else {
+                    stdma_cmd = bm_ready;
+                };
+            };
+        } else if (stdma_cmd == bm_ready) {
+            bsy();
+            drq();
+            stdma_cmd = dma_read;
+
+    //        bmlba[40:47]    = reg_lba_high1;
+    //        bmlba[32:39]    = reg_lba_mid1;
+    //        bmlba[24:31]    = reg_lba_low1;
+    //        bmlba[16:23]    = reg_lba_high0;
+    //        bmlba[8:15]     = reg_lba_mid0;
+    //        bmlba[0:7]      = reg_lba_low0;
+    //        bmsectors[0:7]  = reg_sectors;
+    //        bmsectors[8:15] = reg_sectors1;
+
+            reg_bm_status.ACTV = 0;
+            stdma_cmd = wait_bm_ready;
+
+            choice {
+                {
+                    if (reg_bm_command.rW == 1'b1) {
+                        os.read_sectors(reg_lba_low0, reg_lba_mid0, reg_lba_high0, reg_lba_low1, reg_lba_mid1, reg_lba_high1, reg_sectors, reg_sectors1, buf_addr, false);
+                    } else {
+                        os.write_sectors(reg_lba_low0, reg_lba_mid0, reg_lba_high0, reg_lba_low1, reg_lba_mid1, reg_lba_high1, reg_sectors, reg_sectors1, buf_addr, false);
+                    };
+                    command_ok();
+                };
+                {
+                    if (reg_bm_command.rW == 1'b1) {
+                        os.read_sectors (reg_lba_low0, reg_lba_mid0, reg_lba_high0, reg_lba_low1, reg_lba_mid1, reg_lba_high1, reg_sectors, reg_sectors1, buf_addr, true);
+                    } else {
+                        os.write_sectors(reg_lba_low0, reg_lba_mid0, reg_lba_high0, reg_lba_low1, reg_lba_mid1, reg_lba_high1, reg_sectors, reg_sectors1, buf_addr, true);
+                    };
+                    command_err();
+                };
+            }; 
+        } else if (!srst_timer_signalled){
+            srst_timer_signalled = true;
+            clr_intrq();
+            bsy();
+            nrdy();
+            stinternal = reset_ready;
+        } else {
+            case (reg_feature0) {
+                FEAT_WC:  {
+                    wce = true;
+                    command_ok();
+                    os.write_cache_enabled();
+                };
+                FEAT_NWC: {
+                    wce = false;
+                    command_ok();
+                    os.write_cache_disabled();
+                };
+                FEAT_XFR_MODE:  {
+                    if (reg_sectors[3:7] == XM_ULTRA_DMA) {
+                        transfer_mode = reg_sectors[0:2];
+                        pioDMA = true;
+                        command_ok();
+                        os.udma_enabled(transfer_mode);
+                    }
+                    else {
+                        pioDMA = false;
+                        command_ok();
+                        os.udma_enabled(3'd0);
+                    };
+                };
+            };
+        };
+    };
+};
+
+
+endtemplate

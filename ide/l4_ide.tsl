@@ -1,0 +1,202 @@
+import <ide_class.tsl>
+import <ide_dev.tsl>
+
+
+//const uint<2> ionone       = 2'd0;
+//const uint<2> ioinprogress = 2'd1;
+//const uint<2> iosuccess    = 2'd2;
+//const uint<2> ioerror      = 2'd3;
+
+
+/* OS template */
+template l4_ide_os(ide_drv drv, ide_dev dev)
+
+derive ide_os;
+
+//export uint<2> reset_status = ionone;
+//export uint<2> write_status = ionone;
+//export uint<2> read_status  = ionone;
+//export uint<2> wce_status   = ionone;
+//export uint<2> wcd_status   = ionone;
+//export uint<2> udma_status  = ionone;
+
+typedef enum 
+{
+    ionone,
+    ioreset,
+    ioread,
+    iowrite,
+    iowce,
+    iowcd,
+    iosuccess,
+    ioerror,
+    iosuccess_write,
+    ioerror_write,
+    iosuccess_read,
+    ioerror_read,
+    iosuccess_cache,
+    ioerror_cache
+} iostatus;
+
+export iostatus req_status = ionone;
+
+// io request parameters requested by the OS
+uint<48> r_lba          = 48'd0;
+uint<16> r_sectors      = 16'd0;
+uint<32> r_buf          = 32'd0;
+uint<3>  r_udma_mode    = 3'd0;
+
+
+process pos
+{
+    req_status = ioreset;
+    drv.probe();
+    assert ((req_status == iosuccess) || (req_status == ioerror));
+    req_status = ionone;
+    forever {
+        if(dev.int_pending()){
+            drv.handle_irq();
+        };
+
+        if(req_status == ionone){
+            choice {
+                write();
+                read ();
+                cache_enable();
+            };        
+        };
+        pause;
+    };        
+};
+
+goal drv_goal = (req_status == ionone);
+
+task void cache_enable() {
+    req_status = iowce;
+    drv.write_cache_enable();
+};
+
+task controllable void cache_ack(){
+    assert ((req_status == iosuccess_cache) || (req_status == ioerror_cache));
+    req_status = ionone;
+};
+
+task void write () 
+{
+    r_lba     = *;
+    r_sectors = *;
+    r_buf     = *;
+    req_status = iowrite;
+    drv.write(r_lba,r_sectors,r_buf);
+};
+
+task controllable void write_ack(){
+    assert((req_status == ioerror_write) || (req_status == iosuccess_write));
+    req_status = ionone;
+};
+
+task void read () 
+{
+    r_lba     = *;
+    r_sectors = *;
+    r_buf     = *;
+    req_status = ioread;
+    drv.read(r_lba,r_sectors,r_buf);
+};
+
+task controllable void read_ack(){
+    assert((req_status == ioerror_read) || (req_status == iosuccess_read));
+    req_status = ionone;
+};
+
+procedure void write_sectors(uint<8> lba0, uint<8> lba1, uint<8> lba2, uint<8> lba3, uint<8> lba4, uint<8> lba5, uint<8> sectors0, uint<8> sectors1, uint<32> buf, bool xfer_error)
+{
+    // parameters must match the request
+    assert ((lba0 == r_lba[0:7]) && 
+        (lba1 == r_lba[8:15]) && 
+        (lba2 == r_lba[16:23]) && 
+        (lba3 == r_lba[24:31]) && 
+        (lba4 == r_lba[32:39]) && 
+        (lba5 == r_lba[40:47]) &&
+        (sectors0 == r_sectors[0:7]) && 
+        (sectors1 == r_sectors[8:15]) && 
+        (buf == r_buf) &&
+        // the OS must be expecting a write
+        (req_status == iowrite));
+
+    if (xfer_error) {
+        req_status = ioerror_write;
+    } else {
+        req_status = iosuccess_write;
+    };
+
+};
+
+procedure void read_sectors(uint<8> lba0, uint<8> lba1, uint<8> lba2, uint<8> lba3, uint<8> lba4, uint<8> lba5, uint<8> sectors0, uint<8> sectors1, uint<32> buf, bool xfer_error)
+{
+    // parameters must match the request
+    assert ((lba0 == r_lba[0:7]) && 
+        (lba1 == r_lba[8:15]) && 
+        (lba2 == r_lba[16:23]) && 
+        (lba3 == r_lba[24:31]) && 
+        (lba4 == r_lba[32:39]) && 
+        (lba5 == r_lba[40:47]) &&
+        (sectors0 == r_sectors[0:7]) && 
+        (sectors1 == r_sectors[8:15]) && 
+        (buf == r_buf) &&
+        // the OS must be expecting a write
+        (req_status == ioread));
+
+    if (xfer_error) {
+        req_status = ioerror_read;
+    } else {
+        req_status = iosuccess_read;
+    };
+
+};
+
+procedure void reset()
+{
+    assert (req_status == ioreset);
+    req_status = iosuccess;
+};
+
+procedure void write_cache_enabled()
+{
+    assert (req_status == iowce);
+    req_status = iosuccess_cache;
+};
+
+procedure void write_cache_enable_failed()
+{
+    assert (req_status == iowce);
+    req_status = ioerror_cache;
+};
+
+procedure void write_cache_disabled()
+{
+    assert (req_status == iowcd);
+    req_status = iosuccess;
+};
+
+procedure void write_cache_disable_failed()
+{
+    assert (req_status == iowcd);
+    req_status = ioerror;
+};
+
+procedure void udma_enabled(uint<3> udma_mode)
+{
+    assert(false);
+//    if ((udma_status == ioinprogress) && (udma_mode == r_udma_mode))
+//        udma_status = iosuccess;
+};
+
+procedure void udma_enable_failed(uint<3> udma_mode)
+{
+    assert(false);
+//    if ((udma_status == ioinprogress) && (udma_mode == r_udma_mode))
+//        udma_status = ioerror;
+};
+
+endtemplate

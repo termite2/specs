@@ -1,0 +1,67 @@
+import<ide_dev.tsl>
+import<l4_ide.tsl>
+
+/* driver template */ 
+template l4_ide_drv(l4_ide_os os, ide_dev dev)
+
+derive ide_drv;
+
+bool doing_cache = false;
+bool doing_write = false;
+bool doing_read  = false;
+
+task uncontrollable void handle_irq(){
+    if(doing_cache == true){
+        doing_cache = false;
+        os.cache_ack();
+    };
+
+    if(doing_write == true){
+        doing_write = false;
+        os.write_ack();
+    };
+
+    if(doing_read == true){
+        doing_read = false;
+        os.read_ack();
+    };
+};
+
+task uncontrollable void probe()
+{
+//    dev.write8(ide_dev::RCTL, ide_dev::REG_CTLSTAT, 8'd4);
+//    dev.write8(ide_dev::RCTL, ide_dev::REG_CTLSTAT, 8'd0);
+    ...;
+};
+
+task uncontrollable void write_cache_enable ()
+{
+    doing_cache = true;
+//    dev.write8(ide_dev::RCMD, ide_dev::REG_FEATURE0, ide_dev::FEAT_WC);
+//    dev.write8(ide_dev::RCMD, ide_dev::REG_ERRCMD, ide_dev::CMD_SET_FEATURE);
+//
+//    wait (dev.irq_asserted == true);
+//
+//    dev.write8(ide_dev::RCTL, ide_dev::REG_CTLSTAT, 8'd0);
+
+    dev.rcmd_write_errcmd(8'hef);
+    dev.rcmd_write_feature0(8'h2);
+    {};
+};
+
+task uncontrollable void write(uint<48> lba, uint<16> sectors, uint<32> buf)
+{
+    doing_write = true;
+    ...;
+};
+
+
+task uncontrollable void read(uint<48> lba, uint<16> sectors, uint<32> buf)
+{
+    doing_read = true;
+    ...;
+};
+
+
+endtemplate
+
