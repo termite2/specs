@@ -1,0 +1,203 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template i2c_dev_m3(i2c_os os)
+
+derive i2c_dev;
+
+const uint<8> I2CCON  = 8'h00;
+const uint<8> I2CSTAT = 8'h04;
+const uint<8> I2CADD  = 8'h08;
+const uint<8> I2CDS   = 8'h0C;
+const uint<8> I2CLC   = 8'h10;
+
+//registers
+uint<8> i2ccon  = 8'h0;
+uint<8> i2cstat = 8'h0;
+uint<8> i2cadd;
+uint<8> i2cds;
+uint<8> i2clc   = 8'h0;
+
+//master_transmit_st_t master_transmit_st = idle;
+
+function bool ack_enabled(){
+    return i2ccon[7:7] == 1;
+};
+
+function bool clk_src(){
+    return i2ccon[6:6] == 1;
+};
+
+function bool tx_int(){
+    return i2ccon[5:5] == 1;
+};
+
+function uint<4> clk_prescalar(){
+    return i2ccon[0:3];
+};
+
+function mode_t mode_val(uint<8> val){
+    case(val[6:7]) {
+        2'h0 : return slave_receive;
+        2'h1 : return slave_transmit;
+        2'h2 : return master_receive;
+        2'h3 : return master_transmit;
+    };
+    return slave_receive; //why?
+};
+
+function mode_t the_mode(){
+    return mode_val(i2cstat);
+};
+
+function bool val_enabled(uint<8> val){
+    return val[4:4] == 1;
+};
+
+function bool enabled(){
+    return val_enabled(i2cstat);
+};
+
+function uint<7> slave_address(){
+    return i2cadd[1:7];
+};
+
+function uint<8> shift_data(){
+    return i2cds;
+};
+
+function bool filter_enable(){
+    return i2clc[2:2] == 1;
+};
+
+function sdaod sda_output_delay(){
+    case(i2clc[0:1]) {
+        2'h0 : return clocks0;
+        2'h1 : return clocks5;
+        2'h2 : return clocks10;
+        2'h3 : return clocks15;
+    };
+    return clocks0; //why?
+};
+
+task controllable uint<8> read8_i2ccon(){
+    return i2ccon;
+};
+
+task controllable uint<8> read8_i2cds(){
+    return i2cds;
+};
+
+task controllable uint<8> read8_i2cstat(){
+    uint<8> tmp = i2cstat;
+    if(master_transmit_st == idle){
+        tmp[5:5] = 0;
+    } else {
+        tmp[5:5] = 1;
+    };
+    return tmp;
+};
+
+task controllable void write8_i2ccon(uint<8> wval){
+    i2ccon = wval;
+
+    //transmit state machine
+    //clearing pending
+    if(master_transmit_st == addr_transmitted_t && wval[4:4] == 0){
+        if(i2cstat[5:5] == 0){
+            master_transmit_st = transmitting_stop;
+        } else {
+            master_transmit_st = transmitting_data;
+        };
+    };
+    if(master_transmit_st == addr_transmitted_r && wval[4:4] == 0){
+        if(i2cstat[5:5] == 0){
+            master_transmit_st = transmitting_stop;
+        } else {
+            master_transmit_st = receiving_data;
+        };
+    };
+
+    os.config_updated();
+};
+
+
+task controllable void write8_i2cstat(uint<8> wval){
+    i2cstat[6:7] = wval[6:7];
+    i2cstat[4:4] = wval[4:4];
+    i2cstat[5:5] = wval[5:5];
+
+    //transmit state machine
+    //writing busy
+    if(master_transmit_st == idle && val_enabled(wval)){
+        if(wval[5:5] == 1){
+            //set busy
+            i2cstat[5:5] = 1;
+            case (mode_val(wval)) {
+                master_transmit : master_transmit_st = transmitting_address_t;
+                master_receive  : master_transmit_st = transmitting_address_r;
+            };
+        };
+    };
+};
+
+task controllable void write8_i2cadd(uint<8> wval){
+    //I2CADD  : if(enabled()) {
+        i2cadd  = wval;
+    //};
+};
+
+task controllable void write8_i2cds(uint<8> wval){
+    //I2CDS   : if(enabled()) {
+        i2cds   = wval;
+    //};
+};
+
+task controllable void write8_i2clc(uint<8> wval){
+    I2CLC   : i2clc   = wval;
+};
+
+//transmit state machine
+process pmaster {
+    forever {
+        pause;
+        case(master_transmit_st){
+            transmitting_address_t : {
+                //address is a write address
+                assert(i2cds[0:0] == 0);
+
+                master_transmit_st = addr_transmitted_t;
+                i2ccon[4:4] = 1;
+                os.address_written(i2cds[1:7]);
+            };
+            transmitting_data      : {
+                master_transmit_st = addr_transmitted_t;
+                i2ccon[4:4] = 1;
+                os.data_sent(i2cds);
+            };
+            transmitting_address_r : {
+                //address is a read address
+                assert(i2cds[0:0] == 1);
+
+                master_transmit_st = addr_transmitted_r;
+                i2ccon[4:4] = 1;
+                i2cstat[0:0] = *;
+                os.address_written_read(i2cds[1:7], i2cstat[0:0]==1);
+            };
+            receiving_data : {
+                master_transmit_st = addr_transmitted_r;
+                i2ccon[4:4] = 1;
+                i2cds = *;
+                os.data_received(i2cds, i2ccon[7:7]==1);
+            };
+            transmitting_stop      : {
+                //i2ccon[4:4] = 1;
+                master_transmit_st = idle;
+                os.stop_sent();
+            };
+        };
+    };
+};
+
+endtemplate

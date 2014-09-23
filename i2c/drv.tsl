@@ -1,0 +1,36 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template i2c_linux_drv(i2c_dev_m3 dev, i2c_linux os)
+
+derive i2c_drv;
+
+task uncontrollable void configure(){
+    ...;
+};
+
+task uncontrollable void send_address(){
+    ...;
+};
+
+task uncontrollable void send_data(){
+    ...;
+};
+
+task uncontrollable void send_stop(){
+    ...;
+};
+
+task uncontrollable bool send_address_read(){
+    ...;
+    uint<8> res = dev.read8_i2cstat();
+    return (res[0:0] == 1);
+};
+
+task uncontrollable uint<8> read_data(bool ack){
+    ...;
+    return dev.read8_i2cds();
+};
+
+endtemplate

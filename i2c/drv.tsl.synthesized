@@ -1,0 +1,126 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template i2c_linux_drv(i2c_dev_m3 dev, i2c_linux os)
+
+derive i2c_drv;
+
+task uncontrollable void configure(){
+    //address = 0x54
+    dev.write8_i2cadd(/*any value*/1'h0 ++ 7'h54); //why 54? Handwritten driver does this.
+
+    //clc = SDA_DELAY15CLK | FILE_EN
+    dev.write8_i2clc(2'h3 ++ 1'h1 ++ /*any value*/5'h0);
+
+    //control = ACK_EN | CLK_SRC | PRESCALE(3) | IRQ_EN &~ IRQ_PENDING
+    dev.write8_i2ccon(4'h3 ++ 1'h0 ++ 1'h1 ++ 1'h1 ++ 1'h1);
+};
+
+task uncontrollable void send_address(){
+    /*
+        Below order of operations differs from the handwritten driver, though it seems to agree with the datasheet.
+        We do not write to the status register twice as the handwritten driver does.
+        This needs to be tested.
+    */
+
+    //control = ACK_EN | CLK_SRC | PRESCALE(3) | IRQ_EN &~ IRQ_PENDING
+    dev.write8_i2ccon(4'h3 ++ 1'h0 ++ 1'h1 ++ 1'h1 ++ 1'h1);
+
+    //data = os_addr (&~ 1)
+    dev.write8_i2cds(1'h0 ++ os.os_addr); 
+
+    //stat = MODE_MTX | ENABLE | BUSY
+    dev.write8_i2cstat(/*any value*/4'h0 ++ 1'h1 ++ 1'h1 ++ 2'h3);
+
+    //wait(control & IRQ_PENDING)
+    uint<8> stat;
+    do {
+        stat = dev.read8_i2ccon();
+    } while(stat[4:4] == 0);
+
+    //We do not check for ACK/NACK of address as is done in send_address_read() because the handwritten driver doesnt. why?
+};
+
+task uncontrollable void send_data(){
+    //data = os_data
+    dev.write8_i2cds(os.os_data);
+
+    //control = ACK_EN | CLK_SRC | PRESCALE(3) | IRQ_EN &~ IRQ_PENDING
+    dev.write8_i2ccon(4'h3 ++ 1'h0 ++ 1'h1 ++ 1'h1 ++ 1'h1);
+
+    //wait(control & IRQ_PENDING)
+    uint<8> stat;
+    do {
+        stat = dev.read8_i2ccon();
+    } while(stat[4:4] == 0);
+
+    //The handwritten driver aborts if the device is not busy. I have no idea how the device could become not busy and the flowchart on page 711 doesnt say to check busy. So, I dont do that here. This can be modified to return the busy bit if the handwritten driver is correct. 
+};
+
+/*
+    This differs from the handwritten driver, but agrees with the datasheet. 
+    The handwritten driver sets ~BUSY in the stat register before clearing the pending bit of the last send_data(). 
+    The flowchart on page 711 of the documentation clears the pending bit before setting ~BUSY in the stat register and then clears the pending bit again, as we do here.
+    This needs to be tested.
+*/
+task uncontrollable void send_stop(){
+    //stat = ANY_MODE | ENABLE &~ BUSY //TODO: is it ok to use any mode?
+    dev.write8_i2cstat(/*any value*/4'h0 ++ 1'h1 ++ 1'h0 ++ /*any value*/2'h0); 
+
+    //control = ACK_EN | CLK_SRC | PRESCALE(3) | IRQ_EN &~ IRQ_PENDING
+    dev.write8_i2ccon(4'h3 ++ 1'h0 ++ 1'h1 ++ 1'h1 ++ 1'h1);
+
+    //wait(control & IRQ_PENDING)
+    uint<8> stat;
+    do {
+        stat = dev.read8_i2cstat();
+    } while(stat[5:5] == 1); //we are waiting for the wrong thing
+};
+
+task uncontrollable bool send_address_read(){
+    /*
+        Below order of operations differs from the handwritten driver, though it seems to agree with the datasheet.
+        We do not write to the status register twice as the handwritten driver does.
+        This needs to be tested.
+    */
+
+    //control = ACK_EN | CLK_SRC | PRESCALE(3) | IRQ_EN &~ IRQ_PENDING
+    dev.write8_i2ccon(4'h3 ++ 1'h0 ++ 1'h1 ++ 1'h1 ++ 1'h1);
+
+    //data = os_addr (| 1)
+    dev.write8_i2cds(1'h1 ++ os.os_read_addr); 
+
+    //stat = MODE_MRX | ENABLE | BUSY
+    dev.write8_i2cstat(/*any value*/4'h0 ++ 1'h1 ++ 1'h1 ++ 2'h2);
+
+    //wait(control & IRQ_PENDING)
+    uint<8> stat;
+    do {
+        stat = dev.read8_i2ccon();
+    } while(stat[4:4] == 0);
+
+    uint<8> res = dev.read8_i2cstat();
+    return (res[0:0] == 1);
+};
+
+//TODO: We dont disable acks at the end
+task uncontrollable uint<8> read_data(bool ack){
+    //control = ACK_EN | CLK_SRC | PRESCALE(3) | IRQ_EN &~ IRQ_PENDING
+    if(ack){
+        dev.write8_i2ccon(4'h3 ++ 1'h0 ++ 1'h1 ++ 1'h1 ++ 1'h1);
+    } else {
+        dev.write8_i2ccon(4'h3 ++ 1'h0 ++ 1'h1 ++ 1'h1 ++ 1'h0);
+    };
+
+    //wait(control & IRQ_PENDING)
+    uint<8> stat;
+    do {
+        stat = dev.read8_i2ccon();
+    } while(stat[4:4] == 0);
+
+    //wait(os.was_recvd);
+    return dev.read8_i2cds();
+};
+
+endtemplate

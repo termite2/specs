@@ -1,0 +1,13 @@
+// @LICENSE(NICTA, 2014)
+
+import <os.tsl>
+import <i2c.tsl>
+import <drv.tsl>
+
+template main
+
+instance i2c_linux           os  (drv, dev);
+instance i2c_dev_m3          dev (os);
+instance i2c_linux_drv       drv (dev, os);
+
+endtemplate

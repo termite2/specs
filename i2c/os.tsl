@@ -1,0 +1,153 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template i2c_linux(i2c_drv drv, i2c_dev dev)
+
+derive i2c_os;
+
+procedure void config_updated(){
+    if(inited){
+        //assert(dev.ack_enabled());
+        assert(dev.clk_src());
+        assert(dev.clk_prescalar() == 4'h3);
+        assert(dev.tx_int());
+    };
+};
+
+procedure void configured(){
+    assert(dev.ack_enabled());
+    assert(dev.clk_src());
+    assert(dev.clk_prescalar() == 4'h3);
+    assert(dev.tx_int());
+    assert(dev.sda_output_delay() == clocks15);
+    assert(dev.filter_enable());
+    assert(dev.slave_address() == 7'h54);
+};
+
+bool inited = false;
+
+process pos {
+    drv.configure();
+    configured();
+    inited = true;
+    forever {
+        choice {
+            master_write();
+            master_read();
+            {};
+        };
+        pause;
+    };
+};
+
+goal g1 = (master_state == master_idle) || sent;
+
+//uint<7> os_addr;
+//uint<8> os_data;
+
+task void master_write(){
+
+    os_addr = *;
+    master_state = address_pending;
+    drv.send_address();
+    assert(master_state != address_pending);
+
+    forever {
+        if (master_state == data_pending) {
+            os_data = *;
+            was_sent = false;
+            drv.send_data();
+            assert(was_sent);
+        } else if (master_state == stop_pending) {
+            drv.send_stop();
+            assert(master_state == master_idle);
+        } else if (master_state == master_idle) break;
+
+        pause;
+    };
+};
+
+procedure void address_written(uint<7> addr){
+    assert(master_state == address_pending);
+    assert(addr == os_addr);
+    master_state = data_pending;
+};
+
+bool decis;
+//bool sent;
+prefix sent = false;
+
+task void data_sent(uint<8> data){
+    assert(master_state == data_pending);
+    assert(data == os_data);
+    sent = true;
+    was_sent = true;
+    decis = *;
+    if(decis){
+        master_state = stop_pending;
+    } else {
+        master_state = data_pending;
+    };
+};
+
+task void stop_sent(){
+    assert(master_state == stop_pending || master_read_state == master_read_stop_pending);
+    master_state = master_idle;
+    master_read_state = master_read_idle;
+};
+
+goal g2 = (master_read_state == master_read_idle) || recvd;
+
+bool readAddrAcked;
+bool ack_this_read;
+
+task void master_read(){
+    os_read_addr = *;
+    master_read_state = master_read_address_pending;
+    bool acked = drv.send_address_read();
+    assert(master_read_state == master_read_data_pending);
+    assert(acked == readAddrAcked);
+
+    forever {
+        if(master_read_state == master_read_data_pending){
+            was_recvd = false;
+            ack_this_read = *;
+            uint<8> retnd = drv.read_data(ack_this_read);
+            assert(was_recvd);
+            //assert(retnd == os_read_data);
+        } else if(master_read_state == master_read_stop_pending) {
+            drv.send_stop();
+            assert(master_read_state == master_read_idle);
+        } else if(master_read_state == master_read_idle) break;
+
+        pause;
+    };
+};
+
+procedure void address_written_read(uint<7> addr, bool acked){
+    assert(master_read_state == master_read_address_pending);
+    assert(os_read_addr == addr);
+    master_read_state = master_read_data_pending;
+    readAddrAcked = acked;
+};
+
+bool decis2;
+bool recvd;
+prefix recvd = false;
+
+task void data_received(uint<8> data, bool acked){
+    assert(master_read_state == master_read_data_pending);
+    //assert(ack_this_read == acked);
+    recvd = true;
+    was_recvd = true;
+    decis2 = *;
+    os_read_data = data;
+    if(decis2){
+        master_read_state = master_read_stop_pending;
+    } else {
+        master_read_state = master_read_data_pending;
+    };
+};
+
+endtemplate

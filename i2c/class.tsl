@@ -1,0 +1,102 @@
+// @LICENSE(NICTA, 2014)
+
+typedef enum {
+    slave_receive, slave_transmit, master_receive, master_transmit
+} mode_t;
+
+typedef enum {
+    clocks0, clocks5, clocks10, clocks15
+} sdaod;
+
+//internal state
+typedef enum {
+    idle, 
+    transmitting_address_t, 
+    addr_transmitted_t, 
+    transmitting_data, 
+    transmitting_address_r, 
+    addr_transmitted_r, 
+    receiving_data, 
+    transmitting_stop
+} master_transmit_st_t;
+
+template i2c_dev
+
+task controllable uint<8> read8_i2ccon();
+task controllable uint<8> read8_i2cds();
+task controllable uint<8> read8_i2cstat();
+
+task controllable void write8_i2ccon(uint<8> wval);
+task controllable void write8_i2cstat(uint<8> wval);
+task controllable void write8_i2cadd(uint<8> wval);
+task controllable void write8_i2cds(uint<8> wval);
+task controllable void write8_i2clc(uint<8> wval);
+
+function bool ack_enabled();
+function bool clk_src();
+function bool tx_int();
+function uint<4> clk_prescalar();
+function mode_t mode_val(uint<8> val);
+function mode_t the_mode();
+function bool val_enabled(uint<8> val);
+function bool enabled();
+function uint<7> slave_address();
+function bool filter_enable();
+function sdaod sda_output_delay();
+
+//internal state
+export master_transmit_st_t master_transmit_st = idle;
+
+endtemplate
+
+template i2c_drv
+
+task uncontrollable void configure();
+task uncontrollable void send_address();
+task uncontrollable void send_data();
+task uncontrollable void send_stop();
+task uncontrollable bool send_address_read();
+task uncontrollable uint<8> read_data(bool ack);
+
+endtemplate
+
+template i2c_os
+export uint<7> os_addr;
+export uint<8> os_data;
+export uint<8> os_read_data;
+export bool sent;
+
+export uint<7> os_read_addr;
+
+procedure void address_written(uint<7> addr);
+task void data_sent(uint<8> data);
+task void stop_sent();
+procedure void address_written_read(uint<7> addr, bool acked);
+task void data_received(uint<8> data, bool acked);
+procedure void config_updated();
+
+//internal state
+
+typedef enum {
+    master_idle,
+    address_pending,
+    data_pending,
+    stop_pending
+} master_state_t;
+
+export master_state_t master_state = master_idle;
+
+typedef enum {
+    master_read_idle,
+    master_read_address_pending,
+    master_read_data_pending,
+    master_read_stop_pending
+} master_read_state_t;
+
+export master_read_state_t master_read_state = master_read_idle;
+
+export bool was_sent;
+
+export bool was_recvd;
+
+endtemplate
