@@ -1,0 +1,56 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template uart_linux_drv(uart_dev dev, uart_linux os)
+
+derive uart_drv;
+
+task uncontrollable void configure(){
+    //ufracval = 0x3 - this is arbitrary and was decided by the OS spec
+    dev.write8_ufracval(4'h3 ++ /*any value*/28'h0);
+
+    //ubrddib = 0x1234 - this is arbitrary and was decided by the OS spec
+    dev.write8_ubrdiv(16'h1234 ++ /*any value*/16'h0);
+
+    //uintm = RXD | ERROR | TXD | MODEM
+    dev.write8_uintm(1'h1 ++ 1'h1 ++ 1'h1 ++ 1'h1 ++ /*any value*/28'h0);
+
+    //ulcon = WORD_LENGTH_8 | ~2_STOP_BITS | NO_PARITY | NORMAL_MODE
+    dev.write8_ulcon(2'h3 ++ 1'h0 ++ 3'h0 ++ 1'h0 ++ /*any value*/25'h0);
+
+    //ucon = RX_INTERRUPT_OR_POLLING | TX_INTERRUPT_OR_POLLING | ~SEND_BREAK | ~LOOP_BACK | ~RX_ERROR_STATUS_INT_EN | ~RX_TIMEOUT_INT_EN | RX_INT_TYPE_LEVEL | TX_INT_TYPE_LEVEL | ~RX_TIMEOUT_INT
+    dev.write8_ucon(2'h1 ++ 2'h1 ++ 1'h0 ++ 1'h0 ++ 1'h0 ++ 1'h0 ++ 1'h1 ++ 1'h1 ++ /*any value*/ 1'h0 ++ 1'h0 ++ /*any value*/20'h0);
+
+    //ufcon = FIFO_ENABLED | RX_FIFO_TRIGGER_32 | TX_TRIGGER_LEVEL_0
+    dev.write8_ufcon(1'h1 ++ /*any value*/3'h0 ++ 3'h0 ++ /*any value*/1'h0 ++ 3'h0 ++ /*any value*/21'h0);
+
+    //TODO: the handwritten driver resets the FIFO here. We should probably do the same.
+    //Handwritten driver clears interrupts here, but we shouldn't need to because they are always masked
+
+    {};
+};
+
+task uncontrollable void send_byte(){
+    uint<32> res;
+    do {
+        res = dev.read_ufstat();
+    } while(res[24:24] == 1);
+    //UFSTAT & TX_FIFO_FULL
+
+    //UTXH = data
+    dev.write8_utxh(os.os_write_data ++ /*any value*/24'h0);
+};
+
+task uncontrollable uint<8> receive_byte(){
+    uint<32> res;
+    do {
+        res = dev.read_ufstat();
+    } while(res[8:8] == 0 && res[0:7] == 8'h0);
+    //UFSTAT & RX_FIFO_FULL && (UFSTAT & RX_FIFO_CNT == 0)
+
+    //return URXH
+    return dev.read_urxh()[0:7];
+};
+
+endtemplate

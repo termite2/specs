@@ -1,0 +1,135 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template uart_linux(uart_drv drv, uart_dev dev)
+
+derive uart_os;
+
+procedure void configured(){
+    assert(dev.infrared_enabled()      == false &&
+           dev.parity()                == none  &&
+           dev.stop_bits()             == stop1 &&
+           dev.width()                 == bit8  &&
+
+           dev.tx_int_type()           == level  &&
+           dev.rx_int_type()           == level  &&
+           dev.rx_error_int_enabled()  == false  &&
+           dev.loopback_mode()         == false  &&
+           dev.send_break()            == false  &&
+           dev.transmit_mode()         == int_rq &&
+           dev.receive_mode()          == int_rq &&
+           dev.rx_timeout_enabled()    == false  &&
+           dev.rx_timeout_empty_fifo() == false  &&
+
+           dev.baud_div()              == 16'h1234 && //todo
+           dev.frac_baud_div()         == 4'h3     && //todo
+
+           dev.tx_fifo_trigger_level() == t0b0  &&
+           dev.rx_fifo_trigger_level() == r0b32 &&
+           dev.fifo_enabled()          == true  &&
+
+           dev.modem_masked()          == true && 
+           dev.txd_masked()            == true &&
+           dev.error_masked()          == true &&
+           dev.rxd_masked()            == true
+    );  
+};
+
+process pos {
+    drv.configure();
+    configured();
+    forever {
+        choice {
+            send_byte();
+            receive_byte();
+            {};
+        };
+        pause;
+    };
+};
+
+//Sending
+
+typedef enum {
+    send_idle, send_1, send_2
+} send_state_t;
+
+send_state_t send_state = send_idle; 
+
+bool sent = false;
+prefix sent = false;
+goal g1 = send_state == send_idle || sent;
+
+task void send_byte(){
+
+    if(send_state == send_idle){
+        os_write_data = *;
+        send_state = send_1;
+    } else if (send_state == send_1) {
+        os_write_data2 = *;
+        send_state = send_2;
+    };
+
+    drv.send_byte();
+};
+
+task void byte_transmitted(uint<8> byte){
+    sent = true;
+
+    assert(byte == os_write_data);
+
+    if(send_state == send_1){
+        send_state = send_idle;
+    } else if (send_state == send_2) {
+        assert(byte == os_write_data);
+        os_write_data = os_write_data2;
+        send_state = send_1;
+    } else {
+        assert(false);
+    };
+
+};
+
+//Receiving
+
+typedef enum {
+    receive_idle, received_1, received_2
+} receive_state_t;
+
+receive_state_t receive_state = receive_idle;
+
+uint<8> os_receive_data;
+
+bool in_driver = false;
+
+goal g2 = (!in_driver) || (receive_state == receive_idle);
+
+task void receive_byte(){
+    in_driver = true;
+    uint<8> res = drv.receive_byte();
+    in_driver = false;
+
+    assert(res == os_read_data);
+
+    if(receive_state == received_1){
+        receive_state = receive_idle;
+    } else if (receive_state == received_2){
+        receive_state = received_1;
+        os_read_data = os_read_data2;
+    } else {
+        assert(false);
+    };
+};
+
+task void byte_received(uint<8> byte){
+    if(receive_state == receive_idle){
+        os_read_data = byte;
+        receive_state = received_1;
+    } else if (receive_state == received_1){
+        os_read_data2 = byte;
+        receive_state = received_2;
+    };
+};
+
+endtemplate

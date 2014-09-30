@@ -1,0 +1,102 @@
+// @LICENSE(NICTA, 2014)
+
+typedef enum {
+    none, odd, even, forced1, forced0
+} parity_t;
+
+typedef enum {
+    stop1, stop2
+} stop_t;
+
+typedef enum {
+    bit5, bit6, bit7, bit8
+} width_t;
+
+typedef enum {
+    level, pulse
+} int_type_t;
+
+typedef enum {
+    disabled, int_rq, dma, reserved
+} mode_t;
+
+typedef enum {
+    t0b0, t0b32, t0b64, t0b96, t0b128, t0b160, t0b192, t0b224
+} tx_trigger_level_ch0_t;
+
+typedef enum {
+    r0b32, r0b64, r0b96, r0b128, r0b160, r0b192, r0b224, r0b256
+} rx_trigger_level_ch0_t;
+
+//Device internals
+typedef enum {
+    transmit_idle, transmit_transmitting
+} transmit_state_t;
+
+
+template uart_dev
+
+function int_type_t tx_int_type();
+function int_type_t rx_int_type();
+function bool rx_error_int_enabled();
+function bool loopback_mode();
+function bool send_break();
+function mode_t transmit_mode();
+function mode_t receive_mode();
+function bool rx_timeout_enabled();
+function bool rx_timeout_empty_fifo();
+
+function bool     infrared_enabled();
+function parity_t parity();
+function stop_t   stop_bits();
+function width_t  width();
+function uint<16> baud_div();
+function uint<4>  frac_baud_div();
+
+function tx_trigger_level_ch0_t tx_fifo_trigger_level();
+function rx_trigger_level_ch0_t rx_fifo_trigger_level();
+function bool fifo_enabled();
+
+function bool modem_masked();
+function bool txd_masked();
+function bool error_masked();
+function bool rxd_masked();
+
+task controllable uint<32> read_urxh();
+task controllable uint<32> read_ufstat();
+
+task controllable void write8_ulcon(uint<32> val);
+task controllable void write8_ucon(uint<32> val);
+task controllable void write8_ufcon(uint<32> val);
+task controllable void write8_umcon(uint<32> val);
+task controllable void write8_utxh(uint<32> val);
+task controllable void write8_ubrdiv(uint<32> val);
+task controllable void write8_ufracval(uint<32> val);
+task controllable void write8_uintm(uint<32> val);
+
+export transmit_state_t transmit_state = transmit_idle;
+
+export bool receive_pending = false;
+
+endtemplate
+
+template uart_drv
+
+task uncontrollable void configure();
+task uncontrollable void send_byte();
+task uncontrollable uint<8> receive_byte();
+
+endtemplate
+
+template uart_os
+
+export uint<8> os_write_data;
+export uint<8> os_write_data2;
+
+export uint<8> os_read_data;
+export uint<8> os_read_data2;
+
+task void byte_transmitted(uint<8> byte);
+task void byte_received(uint<8> byte);
+
+endtemplate

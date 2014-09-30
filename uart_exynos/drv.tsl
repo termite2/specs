@@ -1,0 +1,29 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template uart_linux_drv(uart_dev dev, uart_linux os)
+
+derive uart_drv;
+
+task uncontrollable void configure(){
+    ...;
+};
+
+task uncontrollable void send_byte(){
+    ...;
+};
+
+//We cant simply have a magic block followed by the return statement in the function below. Magic blocks must eventually return. However, the while loop may loop forever if no bytes are received. Ideally, magic blocks would be decoupled from the requirement that they complete. There is a goal in the os spec that guarantees that this function does terminate under reasonable circumstances. 
+task uncontrollable uint<8> receive_byte(){
+    uint<32> res;
+    do {
+        res = dev.read_ufstat();
+    } while(res[8:8] == 0 && res[0:7] == 8'h0);
+    //UFSTAT & RX_FIFO_FULL && (UFSTAT & RX_FIFO_CNT == 0)
+
+    //return URXH
+    return dev.read_urxh()[0:7];
+};
+
+endtemplate

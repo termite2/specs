@@ -1,0 +1,271 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template uart_hw(uart_os os)
+
+derive uart_dev;
+
+const uint<8> ULCON    = 8'h00;
+const uint<8> UCON     = 8'h04;
+const uint<8> UFCON    = 8'h08;
+const uint<8> UMCON    = 8'h0C;
+const uint<8> UTRSTAT  = 8'h10;
+const uint<8> UERSTAT  = 8'h14;
+const uint<8> UMSTAT   = 8'h18;
+const uint<8> UTXH     = 8'h1C;
+const uint<8> URXH     = 8'h20;
+const uint<8> UBRDIV   = 8'h24;
+const uint<8> UFRACVAL = 8'h28;
+const uint<8> UINTP    = 8'h30;
+const uint<8> UINTS    = 8'h34;
+const uint<8> UINTM    = 8'h38;
+
+uint<32> ulcon    = 32'h00;
+uint<32> ucon     = 32'h03;
+uint<32> ufcon    = 32'h00;  
+uint<32> umcon    = 32'h00;
+uint<32> utrstat  = 32'h06;
+uint<32> uerstat  = 32'h00;
+uint<32> umstat   = 32'h00;
+uint<32> utxh     = 32'h00;
+uint<32> urxh     = 32'h00;
+uint<32> ubrdiv   = 32'h00;
+uint<32> ufracval = 32'h00;
+uint<32> uintp    = 32'h00;
+uint<32> uints    = 32'h00;
+uint<32> uintm    = 32'h00;
+uint<32> ufstat   = 32'h00;
+
+//transmit_state_t transmit_state = transmit_idle;
+
+typedef enum {
+    receive_idle, receive_receiving
+} receive_state_t;
+
+receive_state_t receive_state = receive_idle;
+
+function int_type_t tx_int_type() {
+    case (ucon[9:9]) {
+        0 : return pulse;
+        default : return level;
+    };
+};
+
+function int_type_t rx_int_type() {
+    case (ucon[8:8]) {
+        0 : return pulse;
+        default : return level;
+    };
+};
+
+function bool rx_error_int_enabled() {
+    return ucon[6:6] == 1;
+};
+
+function bool loopback_mode() {
+    return ucon[5:5] == 1;
+};
+
+function bool send_break() {
+    return ucon[4:4] == 1;
+};
+
+function mode_t transmit_mode() {
+    case(ucon[2:3]) {
+        2'h0 : return disabled;
+        2'h1 : return int_rq;
+        2'h2 : return dma;
+        default : return reserved;
+    };
+};
+
+function mode_t receive_mode() {
+    case(ucon[0:1]) {
+        2'h0 : return disabled;
+        2'h1 : return int_rq;
+        2'h2 : return dma;
+        default : return reserved;
+    };
+};
+
+function bool rx_timeout_enabled(){
+    return ucon[7:7] == 1;
+};
+
+function bool rx_timeout_empty_fifo(){
+    return ucon[11:11] == 1;
+};
+
+function tx_trigger_level_ch0_t tx_fifo_trigger_level() {
+    case (ufcon[8:10]) {
+        3'h0 : return t0b0;
+        3'h1 : return t0b32;
+        3'h2 : return t0b64;
+        3'h3 : return t0b96;
+        3'h4 : return t0b128;
+        3'h5 : return t0b160;
+        3'h6 : return t0b192;
+        default : return t0b224;
+    };
+};
+
+function rx_trigger_level_ch0_t rx_fifo_trigger_level() {
+    case (ufcon[4:6]) {
+        3'h0 : return r0b32;
+        3'h1 : return r0b64;
+        3'h2 : return r0b96;
+        3'h3 : return r0b128;
+        3'h4 : return r0b160;
+        3'h5 : return r0b192;
+        3'h6 : return r0b224;
+        default : return r0b256;
+    };
+};
+
+function bool fifo_enabled() {
+    return ufcon[0:0] == 1;
+};
+
+function bool infrared_enabled() {
+    return ulcon[6:6] == 1;
+};
+
+function parity_t parity() {
+    case (ulcon[3:5]){
+        3'b100 : return odd;
+        3'b101 : return even;
+        3'b110 : return forced1;
+        3'b111 : return forced0;
+    };
+    return none;
+};
+
+function stop_t stop_bits(){
+    case(ulcon[2:2]){
+        0       : return stop1;
+        default : return stop2;
+    };
+};
+
+function width_t width(){
+    case(ulcon[0:1]){
+        2'b00   : return bit5;
+        2'b01   : return bit6;
+        2'b10   : return bit7;
+        2'b11   : return bit8;
+    };
+    return bit5;
+};
+
+function uint<16>  baud_div(){
+    return ubrdiv[0:15];
+};
+
+function uint<4> frac_baud_div(){
+    return ufracval[0:3];
+};
+
+function bool modem_masked(){
+    return uintm[3:3] == 1;
+};
+
+function bool txd_masked(){
+    return uintm[2:2] == 1;
+};
+
+function bool error_masked(){
+    return uintm[1:1] == 1;
+};
+
+function bool rxd_masked(){
+    return uintm[0:0] == 1;
+};
+
+task controllable uint<32> read_urxh(){
+    receive_pending = false;
+    ufstat[8:8] = 0;
+    ufstat[0:7] = 8'h0;
+    return urxh;
+};
+
+task controllable uint<32> read_ufstat(){
+    return ufstat;
+};
+
+task controllable void write8_ulcon(uint<32> val){
+    ulcon = val;
+};
+
+task controllable void write8_ucon(uint<32> val){
+    ucon = val;
+};
+
+task controllable void write8_ufcon(uint<32> val){
+    ufcon = val;
+};
+
+task controllable void write8_umcon(uint<32> val){
+    umcon = val;
+};
+
+task controllable void write8_utxh(uint<32> val){
+    utxh = val;
+    transmit_state = transmit_transmitting;
+    ufstat[24:24] = 1;
+};
+
+task controllable void write8_ubrdiv(uint<32> val){
+    ubrdiv = val;
+};
+
+task controllable void write8_ufracval(uint<32> val){
+    ufracval = val;
+};
+
+task controllable void write8_uintm(uint<32> val){
+    uintm = val;
+};
+
+process ptransmit {
+    forever {
+        if(transmit_state == transmit_transmitting){
+            transmit_state = transmit_idle;
+            ufstat[24:24]  = 0;
+            os.byte_transmitted(utxh[0:7]);
+        };
+        pause;
+    };
+};
+
+process preceive {
+    forever {
+        choice {
+            {
+
+                //If another byte is received before we get a chance to read the last one, the byte is lost. With any finite fifo size it would be impossible to guarantee that no bytes are lost. We work around this by not allowing a byte to be recieved if the last one hasn't been read yet.
+
+                if(!receive_pending){ 
+                    urxh[0:7] = *;
+                    //Fake a fifo. When a byte is received, either the fifo becomes full (and the full flag is set and the count is set to 0, as per the datasheet), or, the count is incremented (which we model as non-deterministic assignment to anything other than 0).
+                    choice {
+                        {
+                            ufstat[8:8] = 1;
+                            ufstat[0:7] = 8'h0;
+                        };
+                        {
+                            ufstat[8:8] = 0;
+                            ufstat[0:7] = 8'h1;
+                        };
+                    };
+                    os.byte_received(urxh[0:7]);
+                    receive_pending = true;
+                };
+            };
+            {};
+        };
+        pause;
+    };
+};
+
+endtemplate
