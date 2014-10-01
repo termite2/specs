@@ -1,0 +1,25 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+import <spi.tsl>
+
+template spi_linux_drv(spi_hw dev, spi_linux os)
+
+derive spi_drv;
+
+task uncontrollable void reset(){
+    ...;
+};
+
+task uncontrollable void configure(){
+    ...;
+};
+
+task uncontrollable uint<8> transfer(out bool rcv_ok, out bool snd_ok){
+    ...;
+    rcv_ok = true;
+    snd_ok = dev.read_spi_status()[3:3] == 1'd0;
+    return dev.read_spi_rx_data();
+};
+
+endtemplate

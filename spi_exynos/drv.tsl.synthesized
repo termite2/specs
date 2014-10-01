@@ -1,0 +1,68 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template spi_linux_drv(spi_hw dev, spi_linux os)
+
+derive spi_drv;
+
+task uncontrollable void reset(){
+
+    //CH_CFG = TX_CH_OFF | RX_CH_OFF | FORMAT_A | ACTIVE_HIGH | MASTER | RESET_INACTIVE | HIGH_SPEED_DISABLED
+    //Make sure both channels are off before we reset 
+    dev.write_ch_cfg(1'h0 ++ 1'h0 ++ /*any value*/3'h0 ++ 1'h0 ++ /*any value*/26'h0);
+
+    //CH_CFG = TX_CH_OFF | RX_CH_OFF | FORMAT_A | ACTIVE_HIGH | MASTER | RESET_ACTIVE | HIGH_SPEED_DISABLED
+    //Reset
+    dev.write_ch_cfg(1'h0 ++ 1'h0 ++ /*any value*/3'h0 ++ 1'h1 ++ /*any value*/26'h0);
+
+    //CH_CFG = TX_CH_ON | RX_CH_ON | FORMAT_A | ACTIVE_HIGH | MASTER | RESET_ACTIVE | HIGH_SPEED_DISABLED
+    //Finish reset, enable both channels. Handwritten driver separates these two steps. Should not be necessary. 
+    dev.write_ch_cfg(1'h1 ++ 1'h1 ++ /*any value*/3'h0 ++ 1'h0 ++ /*any value*/26'h0);
+
+    //On the first reset, the handwritten driver doesnt enable the channels as we do here. This should be fine. Needs testing.
+
+    {};
+};
+
+task uncontrollable void configure(){
+
+    //CS_REG = SLAVE_SELECTION_INACTIVE | CHIP_SELECT_MANUAL | NCS_TIME_COUNT=0
+    dev.write_cs_reg(1'h1 ++ 1'h0 ++ /*any value*/2'h0 ++ 6'h0 ++ /*any value*/22'h0);
+
+    //MODE_CFG = DMA_TYPE_SINGLE | TX_DMA_DISABLED | RX_DMA_DISABLED | TX_RDY_LVL = 32 | RX_RDY_LEVEL  = 1 | BUS_WIDTH_BYTE | TRAILING_CNT=1 | CH_WIDTH_BYTE
+    dev.write_mode_cfg(1'h0 ++ 1'h0 ++ 1'h0 ++ /*any value*/2'h0 ++ 6'h32 ++ 6'h1 ++ 2'h0 ++ 10'h0 ++ 2'h0 ++ /*any value*/1'h0);
+
+    {};
+};
+
+task uncontrollable uint<8> transfer(out bool rcv_ok, out bool snd_ok){
+    uint<32> status;
+    uint<8> rx_dat;
+
+    //PACKET_CNT = 1 | ENABLED
+    dev.write_packet_cnt_reg(16'd1 ++ 1'd1 ++ 15'd0);
+
+    //TX_DATA = os_data;
+    dev.write_spi_tx_data(os.send_data ++ /*any value*/24'h0);
+
+    do {
+        status = dev.read_spi_status();
+    } while(status[0:0] == 1'd0);
+    //SPI_STATUS & TX_FIFO_RDY
+
+    rcv_ok = true;
+
+    //SPI_STATUS & TX_OVERRUN
+    snd_ok = dev.read_spi_status()[3:3] == 1'd0;
+
+    //RX_DATA
+    rx_dat = dev.read_spi_rx_data();
+
+    if (!snd_ok)
+        reset();
+
+    return rx_dat;
+};
+
+endtemplate

@@ -1,0 +1,92 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template spi_linux(spi_drv drv, spi_dev dev)
+
+derive spi_os;
+
+task void reset(){
+    reset_done = true;
+};
+
+procedure void config_assert(){
+    //ch_cfg
+    assert(dev.reset_in_progress() == false       &&
+           dev.high_speed()        == false       &&
+           dev.mode()              == master      &&
+           dev.clk_mode()          == active_high &&
+           dev.format()            == format_a    &&
+           dev.rx_ch_on()          == true        &&
+           dev.tx_ch_on()          == true);
+
+    //mode_cfg
+    assert(dev.ch_width()          == byte        &&
+           dev.trailing_cnt()      == 10'h00      &&
+           dev.bus_width()         == byte        &&
+           dev.rx_rdy_lvl()        == 6'h1        &&
+           dev.tx_rdy_lvl()        == 6'h32       &&
+           dev.rx_dma()            == false       &&
+           dev.tx_dma()            == false       &&
+           dev.dma_type()          == single);
+
+    //cs_reg
+    assert(dev.ncs_time_count() == 6'h0           &&
+           dev.auto_n_manual()  == manual         &&
+           dev.nssout()         == inactive);
+
+};
+
+bool reset_done;
+
+task void do_reset(){
+    reset_done = false;
+    drv.reset();
+    assert(reset_done);
+
+    assert(
+        dev.rx_ch_on()          == true        &&
+        dev.tx_ch_on()          == true
+    );
+};
+
+process pos {
+    do_reset();
+
+    drv.configure();
+    config_assert();
+    pause;
+    forever {
+        choice {
+            transfer();
+            {};
+        };
+        pause;
+    };
+};
+
+goal g1 = transfer_state == transfer_idle;
+
+task void transfer(){
+    bool rcv_ok;
+    bool snd_ok;
+    send_data = *;
+    transfer_state = transfer_transferring;
+    uint<8> res = drv.transfer(rcv_ok, snd_ok);
+    assert((snd_ok == tx_success) && (rcv_ok == rx_success));
+    assert((rcv_ok == false) || (res == data_recvd));
+    assert(transfer_state == transfer_idle);
+
+};
+
+procedure void data_transferred(uint<8> data_in, bool rcv_ok, uint<8> data_out, bool snd_ok){
+    assert(transfer_state == transfer_transferring);
+
+    assert(data_out == send_data);
+    data_recvd = data_in;
+    tx_success = snd_ok;
+    rx_success = rcv_ok;
+    transfer_state = transfer_idle;
+};
+
+endtemplate

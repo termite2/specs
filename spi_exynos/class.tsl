@@ -1,0 +1,93 @@
+// @LICENSE(NICTA, 2014)
+
+typedef enum {
+    slave,
+    master
+} mode_t;
+
+typedef enum {
+    active_low,
+    active_high
+} clk_mode_t;
+
+typedef enum {
+    format_a,
+    format_b
+} format_t;
+
+typedef enum {
+    byte,
+    halfword,
+    word, 
+    reserved
+} width_t;
+
+typedef enum {
+    single,
+    burst
+} dma_type_t;
+
+typedef enum {
+    manual,
+    auto
+} cs_toggle_type;
+
+typedef enum {
+    active,
+    inactive
+} slave_selection_t;
+
+template spi_dev
+
+//ch_cfg
+function bool reset_in_progress();
+function bool high_speed();
+function mode_t mode();
+function clk_mode_t clk_mode();
+function format_t format();
+function bool rx_ch_on();
+function bool tx_ch_on();
+
+//mode_cfg
+function width_t ch_width();
+function uint<10> trailing_cnt();
+function width_t bus_width();
+function uint<6> rx_rdy_lvl();
+function uint<6> tx_rdy_lvl();
+function bool rx_dma();
+function bool tx_dma();
+function dma_type_t dma_type();
+function uint<6> ncs_time_count();
+function cs_toggle_type auto_n_manual();
+function slave_selection_t nssout();
+
+endtemplate
+
+template spi_drv
+
+task uncontrollable void reset();
+task uncontrollable void configure();
+task uncontrollable uint<8> transfer(out bool rcv_ok, out bool snd_ok);
+
+endtemplate
+
+template spi_os
+
+procedure void data_transferred(uint<8> data_in, bool rcv_ok, uint<8> data_out, bool snd_ok);
+task void reset();
+
+export uint<8> send_data;
+export uint<8> data_recvd;
+export bool    tx_success;
+export bool    rx_success;
+
+typedef enum {
+    transfer_idle,
+    transfer_transferring,
+    transfer_send_ack
+} transfer_state_t;
+
+export transfer_state_t transfer_state = transfer_idle;
+
+
+endtemplate

@@ -1,0 +1,231 @@
+// @LICENSE(NICTA, 2014)
+
+import <class.tsl>
+
+template spi_hw(spi_os os)
+
+derive spi_dev;
+
+const uint<8> CH_CFG          = 8'h00;
+const uint<8> MODE_CFG        = 8'h08;
+const uint<8> CS_REG          = 8'h0c;
+const uint<8> SPI_INT_EN      = 8'h10;
+const uint<8> SPI_STATUS      = 8'h14;
+const uint<8> SPI_TX_DATA     = 8'h18;
+const uint<8> SPI_RX_DATA     = 8'h1C;
+const uint<8> PACKET_CNT_REG  = 8'h20;
+const uint<8> PENDING_CLR_REG = 8'h24;
+const uint<8> SWAP_CFG        = 8'h28;
+const uint<8> FB_CLK_SEL      = 8'h2C;
+
+uint<7>  ch_cfg          ; // =  7'h00;
+uint<31> mode_cfg        ; // = 31'h00;
+uint<10> cs_reg          ; // = 10'h01;  
+uint<6>  spi_int_en      =  6'h00;
+uint<26> spi_status      = 26'h00;
+uint<32> spi_tx_data     = 32'h00;
+uint<32> spi_rx_data     = 32'h00;
+uint<17> packet_cnt_reg  = 17'h00;
+uint<5>  pending_clr_reg =  5'h00;
+uint<8>  swap_cfg        =  8'h00;
+uint<2>  fb_clk_sel      =  2'h00;
+
+uint<8>  fifo_cnt        = 8'd0;
+
+function bool resetting(){
+    return ch_cfg[5:5] == 1;
+};
+
+task controllable uint<8> read_spi_rx_data(){
+    return spi_rx_data[0:7];
+};
+
+task controllable uint<32> read_spi_status(){
+    return spi_status ++ 6'd0;
+};
+
+
+task controllable void write_ch_cfg(uint<32> wvalue){
+    if(wvalue[5:5] == 1){
+        spi_tx_data = 32'h0;
+        spi_rx_data = 32'h0;
+        fifo_cnt    = 8'd0;
+        spi_status  = 26'h0;
+        packet_cnt_reg = 17'd0;
+
+        assert(wvalue[0:0] == 0);
+        assert(wvalue[1:1] == 0);
+        assert(rx_ch_on() == false);
+        assert(tx_ch_on() == false);
+    };
+    if(wvalue[5:5] == 0 && ch_cfg[5:5] == 1){
+        os.reset();
+    };
+    ch_cfg = wvalue[0:6];
+};
+
+task controllable void write_mode_cfg(uint<32> wvalue){
+    mode_cfg = wvalue[0:30];
+};
+
+task controllable void write_cs_reg(uint<32> wvalue){
+    cs_reg = wvalue[0:9];
+};
+
+task controllable void write_spi_int_en(uint<32> wvalue){
+    spi_int_en = wvalue[0:5];
+};
+
+task controllable void write_spi_tx_data(uint<32> wvalue){
+    if(!resetting()){
+        if(fifo_cnt == 8'd0) {
+            fifo_cnt = 8'd1;
+            spi_status[0:0] = 1'd0;
+            spi_tx_data = wvalue;
+        };
+    };
+};
+
+task controllable void write_packet_cnt_reg(uint<32> wvalue){
+    packet_cnt_reg = wvalue[0:16];
+};
+
+task controllable void write_pending_clr_reg(uint<32> wvalue){
+    pending_clr_reg = wvalue[0:4];
+};
+
+task controllable void write_swap_cfg(uint<32> wvalue){
+    swap_cfg = wvalue[0:7];
+};
+
+task controllable void write_fb_clk_sel(uint<32> wvalue){
+    fb_clk_sel = wvalue[0:1];
+};
+
+function bool reset_in_progress(){
+    return ch_cfg[5:5] == 1;
+};
+
+function bool high_speed(){
+    return ch_cfg[6:6] == 1 && ch_cfg[2:2] == 1;
+};
+
+function mode_t mode(){
+    case (ch_cfg[4:4]) {
+        0 : return master;
+        1 : return slave;
+    };
+    return master;
+};
+
+function clk_mode_t clk_mode(){
+    case (ch_cfg[3:3]) {
+        0 : return active_high;
+        1 : return active_low;
+    };
+    return active_high;
+};
+
+function format_t format(){
+    case (ch_cfg[2:2]) {
+        0 : return format_a;
+        1 : return format_b;
+    };
+    return format_a;
+};
+
+function bool rx_ch_on(){
+    return ch_cfg[1:1] == 1;
+};
+
+function bool tx_ch_on(){
+    return ch_cfg[0:0] == 1;
+};
+
+function width_t ch_width(){
+    case(mode_cfg[29:30]){
+        2'h0 : return byte;
+        2'h1 : return halfword;
+        2'h2 : return word;
+        2'h3 : return reserved;
+    };
+    return byte;
+};
+
+function uint<10> trailing_cnt(){
+    return mode_cfg[19:28];
+};
+
+function width_t bus_width(){
+    case(mode_cfg[17:18]){
+        2'h0 : return byte;
+        2'h1 : return halfword;
+        2'h2 : return word;
+        2'h3 : return reserved;
+    };
+    return byte;
+};
+
+function uint<6> rx_rdy_lvl(){
+    return mode_cfg[11:16];
+};
+
+function uint<6> tx_rdy_lvl(){
+    return mode_cfg[5:10];
+};
+
+function bool rx_dma(){
+    return mode_cfg[2:2] == 1;
+};
+
+function bool tx_dma(){
+    return mode_cfg[1:1] == 1;
+};
+
+function dma_type_t dma_type(){
+    case (mode_cfg[0:0]) {
+        0 : return single;
+        1 : return burst;
+    };
+    return single;
+};
+
+function uint<6> ncs_time_count(){
+    return cs_reg[4:9];
+};
+
+function cs_toggle_type auto_n_manual(){
+    case(cs_reg[1:1]) {
+        0 : return manual;
+        1 : return auto;
+    };
+    return manual;
+};
+
+function slave_selection_t nssout(){
+    case (cs_reg[0:0]){
+        0 : return active;
+        1 : return inactive;
+    };
+    return active;
+};
+
+process spi_transaction {
+    bool overrun;
+    forever {
+        wait((packet_cnt_reg[16:16] == 1'd1) && (packet_cnt_reg[0:15] == 16'd1) && (fifo_cnt == 8'h1) );
+        if(!resetting()){
+            spi_rx_data[0:7] = *;
+        };
+        if((fifo_cnt == 8'd1) && (spi_status[3:3] == 1'd0)){
+            overrun = *;
+            os.data_transferred(spi_rx_data[0:7], true, spi_tx_data[0:7], !overrun);
+            fifo_cnt = 8'd0;
+            spi_status[0:0] = 1'd1;
+            if (overrun) spi_status[3:3] = 1'd1;
+        };
+        packet_cnt_reg[0:15] = 16'd0;
+    };
+};
+
+endtemplate
