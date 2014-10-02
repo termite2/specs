@@ -22,16 +22,6 @@ typedef enum {
 
 template i2c_dev
 
-task controllable uint<8> read8_i2ccon();
-task controllable uint<8> read8_i2cds();
-task controllable uint<8> read8_i2cstat();
-
-task controllable void write8_i2ccon(uint<8> wval);
-task controllable void write8_i2cstat(uint<8> wval);
-task controllable void write8_i2cadd(uint<8> wval);
-task controllable void write8_i2cds(uint<8> wval);
-task controllable void write8_i2clc(uint<8> wval);
-
 function bool ack_enabled();
 function bool clk_src();
 function bool tx_int();
