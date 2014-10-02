@@ -1,6 +1,8 @@
 // @LICENSE(NICTA, 2014)
 
 import <class.tsl>
+import <i2c.tsl>
+import <os.tsl>
 
 template i2c_linux_drv(i2c_dev_m3 dev, i2c_linux os)
 
