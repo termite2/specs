@@ -24,12 +24,13 @@ task uncontrollable void send(uint<8> data) {
 task uncontrollable void configure(wl_t wl, uint<1> stop_bit, uint<1> parity, uint<1> parity_even, uint<1> stick_parity, uint<16> divisor) {
     pause; // @ bug workaround
 
-    uint<2> wlbits = case (wl) {
-                 bits5 : 2'd0;
-                 bits6 : 2'd1;
-                 bits7 : 2'd2;
-                 bits8 : 2'd3;
-             };
+    uint<2> wlbits;
+    case (wl) {
+        bits5 : wlbits = 2'd0;
+        bits6 : wlbits = 2'd1;
+        bits7 : wlbits = 2'd2;
+        bits8 : wlbits = 2'd3;
+    };
     dev.write8_A3(7'h0 ++ 1'h1);
     dev.write8_A0(divisor[0:7]);
     dev.write8_A1(divisor[8:15]);
