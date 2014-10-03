@@ -1,8 +1,14 @@
-/* Common data types used in Termite drivers.  
+/* Common types and macros used in Termite drivers.  
  * TODO: replace with OS-specific includes. */
 
 #ifndef _TERMITE_H
 #define _TERMITE_H
+
+#include <stddef.h>
+
+#define container_of(ptr, type, member) ({                      \
+        const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
+        (type *)( (char *)__mptr - offsetof(type,member) );})
 
 typedef unsigned char      u8;
 typedef char               s8;
