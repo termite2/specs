@@ -1,6 +1,8 @@
 // @LICENSE(NICTA, 2014)
 
 import <class.tsl>
+import <spi.tsl>
+import <os.tsl>
 
 template spi_linux_drv(spi_hw dev, spi_linux os)
 
