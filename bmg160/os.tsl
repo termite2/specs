@@ -1,0 +1,84 @@
+template gyro_os
+
+process pos {
+    // initialize
+    if (probe())
+        return;
+   
+    check_config();
+    forever {
+        pause;
+        if (dev.irq_asserted) {
+            dev.irq_handler();
+        } else {
+            choice {
+                set_bandwidth();
+                set_scale();
+                config_events(); // enable/disable notifications
+                read_x();
+                read_y();
+                read_z();
+                read_xyz();
+                read_temperature();
+                {};
+            };
+        };
+        check_config();
+    };
+};
+
+void set_bandwidth() {
+    conf_odr = *;
+    assume ((conf_odr == 16'd100) || (conf_odr == 16'd200) || (conf_odr == 16'd400) || (conf_odr == 16'd1000) || (conf_odr == 16'd2000));
+    drv.set_bandwidth(conf_odr);
+};
+
+void set_scale() {
+    conf_scale = *;
+    assume ((conf_odr == 16'd1065) || (conf_odr == 16'd532) || (conf_odr == 16'd266) || (conf_odr == 16'd133) || (conf_odr == 16'd66));
+    drv.set_scale(conf_scale);
+};
+
+void read_temperature() {
+    u32 temp;
+    got_correct_temperature = false;
+    drv.get_temperature (temp);
+    assert(got_correct_temperature);
+};
+
+void read_x() {
+    u16 x;
+    got_correct_x_speed = false;
+    drv.get_x (x);
+    assert(got_correct_x_speed);
+};
+
+void read_y() {
+    u16 y;
+    got_correct_y_speed = false;
+    drv.get_y (y);
+    assert(got_correct_y_speed);
+};
+
+void read_z() {
+    u16 z;
+    got_correct_z_speed = false;
+    drv.get_z (z);
+    assert(got_correct_z_speed);
+};
+
+void read_xyz() {
+    u16 x;
+    u16 y;
+    u16 z;
+    got_correct_xyz_speed = false;
+    drv.get_xyz (x,y,z);
+    assert(got_correct_xyz_speed);
+};
+
+
+
+// set slope (used in setting any motion interrupt)
+
+
+endtemplate

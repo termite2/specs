@@ -1,0 +1,582 @@
+template bmg160
+
+// Register 0x02 (RATE_X_LSB)
+u8 reg_rate_x_lsb;
+
+//Register 0x03 (RATE_X_MSB)
+u8 reg_rate_x_msb;
+
+bool x_msb_lock = false;
+
+//Register 0x04 (RATE_Y_LSB)
+u8 reg_rate_y_lsb;
+
+// Register 0x05 (RATE_Y_MSB)
+u8 reg_rate_y_msb;
+
+bool y_msb_lock = false;
+
+// Register 0x06 (RATE_Z_LSB)
+u8 reg_rate_z_lsb;
+
+// Register 0x07 (RATE_Z_MSB)
+u8 reg_rate_z_msb;
+
+bool z_msb_lock = false;
+
+// Register 0x08 (TEMP)
+u8 reg_temp;
+
+// Register 0x09 (INT_STATUS_0)
+// bit 2: any_int: Any motion interrupt status
+// bit 1: high_int: High rate interrupt status
+wire uint<1> any_int_status = if ((reg_int_status_2[0:0] = 1'h1) || 
+                                  (reg_int_status_2[1:1] = 1'h1) || 
+                                  (reg_int_status_2[2:2] = 1'h1)) 1'b1 
+                              else 1'b0;
+
+
+// Register 0x0A (INT_STATUS_1)
+// bit 7: data_int: New data interrupt status
+// bit 6: auto_offset_int: Auto Offset interrupt status
+// bit 5: fast_offset_int: Fast Offset interrupt status
+// bit 4: fifo_int: Fifo interrupt status
+u8 reg_int_status_1;
+
+//R egister 0x0B (INT_STATUS_2)
+// bit 3: any_sign:    sign of any motion interrupt (‘1’= positive, ‘0’=negative)
+// bit 2: any_first_z: ‘1’ indicates that z-axis is triggering axis of any motion interrupt
+// bit 1: any_first_y: ‘1’ indicates that y-axis is triggering axis of any motion interrupt
+// bit 0: any_first_x: ‘1’ indicates that z-axis is triggering axis of any motion interrupt
+u8 reg_int_status_2;
+
+// Register 0x0C (INT_STATUS_3)
+// bit 3: high_sign:    sign of high rate interrupt (‘1’= positive, ‘0’=negative)
+// bit 2: high_first_z: ‘1’ indicates that z-axis is triggering axis of high rate interrupt
+// bit 1: high_first_y: ‘1’ indicates that y-axis is triggering axis of high rate interrupt
+// bit 0: high_first_x: ‘1’ indicates that z-axis is triggering axis of high rate interrupt
+u8 reg_int_status_3;
+
+// Register 0x0F (RANGE)
+// range<2:0>: Angular Rate Range and Resolution.
+// supported values: 000, 001, 010, 011, 100
+// range<7:6>: write ‘00’
+u8 reg_range;
+
+// Register 0x10 (BW)
+// bw<3:0>:
+// 0x10 bits<3:0> Decimation Factor ODR      Filter Bandwidth
+// ‘0111’         20                100 Hz   32 Hz
+// ‘0110’         10                200 Hz   64 Hz
+// ‘0101’         20                100 Hz   12 Hz
+// ‘0100’         10                200 Hz   23 Hz
+// ‘0011’         5                 400 Hz   47 Hz
+// ‘0010’         2                 1000 Hz  116 Hz
+// ‘0001’         0                 2000 Hz  230 Hz
+// ‘0000’         0                 2000 Hz  Unfiltered (523Hz)
+// ‘1xxx’      Reserved             Reserved Reserved
+u8 reg_bw;
+
+// Register 0x11 (LPM1)
+// Selection of the main power modes
+// bit7:     suspend
+// bit5:     deep_suspend
+// bit[3:1]: sleep_dur
+// suspend, deep_suspend:
+// Main power mode configuration setting {suspend; deep_suspend}:
+// {0; 0}      - NORMAL mode;
+// {0; 1}      - DEEP_SUSPEND mode;
+// {1; 0}      - SUSPEND mode;
+// {all other} - illegal
+// sleep_dur<2:0>: time in ms in fast-power-up mode under advanced power-saving mode.
+// ‘000’ - 2 ms
+// ‘001’ - 4 ms
+// ‘010’ - 5 ms
+// ‘011’ - 8 ms
+// ‘100’ - 10 ms
+// ‘101’ - 15 ms
+// ‘110’ - 18 ms
+// ‘111’ - 20 ms
+u8 reg_lpm1;
+const uint<4> BMG160_MODE_NORMAL       = 4'h0;
+const uint<4> BMG160_MODE_DEEP_SUSPEND = 4'h2;
+const uint<4> BMG160_MODE_SUSPEND      = 4'h8;
+
+bool is_mode_normal() {
+    return (reg_lpm1[4:7] == BMG160_MODE_NORMAL);
+};
+
+// Register 0x12 (LPM2)
+// Configuration settings for fast power-up and external trigger.
+// bit 7: fast powerup: 1 -Drive stays active for suspend mode in order to have a short wake-up
+// time; 0 - Drive is switched off for suspend mode
+// bit[5:4]: ext_trig_sel: external wakeup trigger selection
+// bit[2:0]: autosleep_dur: time in ms in normal mode under advanced power-saving mode
+// ‘000’  Not allowed
+// ‘001’  4 ms
+// ‘010’  5 ms
+// ‘011’  8 ms
+// ‘100’  10 ms
+// ‘101’  15 ms
+// ‘110’  20 ms
+// ‘111’  40 ms
+u8 reg_lpm2;
+
+// Register 0x13 (RATE_HBW)
+// Angular rate data acquisition and data output format.
+// bit 7: data_high_bw: select whether ‘1' unfiltered, or ‘0’- filtered data may be read from the rate data registers.
+// bit 6: shadow_dis: ‘1 ́- disable, or ‘0’- the shadowing mechanism for the rate data output
+// registers. When shadowing is enabled, the content of the rate data
+// component in the MSB register is locked, when the component in the LSB is
+// read, thereby ensuring the integrity of the rate data during read-out. The lock
+// is removed when the MSB is read.
+u8 reg_rate_hbw;
+
+// Register 0x14 (BGW_SOFTRESET)
+// Controls user triggered reset of the sensor.
+// bits 3:0: softreset:  0xB6 - trigger a reset. Other values are ignored. Following a delay, all user
+// configuration settings are overwritten with their default state or the setting
+// stored in the NVM, wherever applicable. This register is functional in all
+// operation modes. Please note, that all application specific settings which are
+// not equal to the default settings (refer to 6.2 register map), must be re-set to
+// its designated values.
+u8 reg_softreset;
+
+// Register 0x15 (INT_EN_0)
+// bit 7: data_en:         ‘1’ (‘0’) enables (disables) new data interrupt
+// bit 6: fifo_en :        ‘1’ (‘0’) enables (disables) new data interrupt
+// bit 2: auto_offset_en:  ‘1’ (‘0’) enables (disables) auto-offset compensation
+u8 reg_int_en_0;
+
+// Register 0x16 (INT_EN_1)
+// bit 3: int2_od:  ‘0’ (‘1’) selects push-pull, ‘1’ selects open drive for INT2
+// bit 2: int2_lvl: ‘0’ (‘1’) selects active level ‘0’ (‘1’) for INT2
+// bit 1: int1_od:  ‘0’ (‘1’) selects push-pull, ‘1’ selects open drive for INT1
+// bit 0: int1_lvl: ‘0’ (‘1’) selects active level ‘0’ (‘1’) for INT1
+u8 reg_int_en_1;
+
+// Register 0x17 (INT_MAP_0)
+// Controls which interrupt signals are mapped to the INT1 pin.
+// bit 3: int1_high: map high rate interrupt to INT1 pin: ‘0’-disabled, or ‘1’-enabled
+// bit 1: int1_any: map Any-Motion to INT1 pin: ‘0’-disabled, or ‘1’-enabled
+u8 reg_int_map_0;
+
+// Register 0x18 (INT_MAP_1)
+// Controls which interrupt signals are mapped to the INT1 pin and INT2 pin.
+// bit 7: int2_data:        map new data interrupt to INT2 pin: ‘0’-disabled, or ‘1’-enabled
+// bit 6: int2_fast_offset: map FastOffset interrupt to INT2 pin: ‘0’-disabled, or ‘1’-enabled
+// bit 5: int2_fifo:        map Fifo interrupt to INT2 pin: ‘0’-disabled, or ‘1’-enabled
+// bit 4: int2_auto_offset: map AutoOffset tap interrupt to INT2 pin: ‘0’-disabled, or ‘1’-enabled
+// bit 3: int1_auto_offset: map AutoOffset tap interrupt to INT1 pin: ‘0’-disabled, or ‘1’-enabled
+// bit 2: int1_fifo:        map Fifo interrupt to INT1 pin: ‘0’-disabled, or ‘1’-enabled
+// bit 1: int1_fast_offset: map FastOffset interrupt to INT1 pin: ‘0’-disabled, or ‘1’-enabled
+// bit 0: int1_data:        map new data interrupt to INT1 pin: ‘0’-disabled, or ‘1’-enabled        
+u8 reg_int_map_1;
+
+// Register 0x19 (INT_MAP_2)
+// Controls which interrupt signals are mapped to the INT2 pin.
+// bit 3: int2_high: map high rate interrupt to INT2 pin: ‘0’-disabled, or ‘1’-enabled
+// bit 1: map Any-Motion to INT2 pin: ‘0’-disabled, or ‘1’-enabled
+u8 reg_int_map_2;
+
+// Register 0x1A
+// Contains the data source definition of those interrupts with selectable data source.
+// bit 5: slow_offset_unfilt: ‘1’ (‘0’) seletects unfiltered (filtered) data for slow offset compensation
+// bit 3: high_unfilt_data: ‘1’ (‘0’) seletects unfiltered (filtered) data for high rate interrupt
+// bit 1: any_unfilt_data: ‘1’ (‘0’) seletects unfiltered (filtered) data for any motion interrupt
+u8 reg_int_map_3;
+
+// Register 0x1B
+// Contains the data source definition of fast offset compensation and the any motion threshold.
+// bit 7: fast_offset_unfilt: ‘1’ (‘0’) selects unfiltered (filtered) data for fast offset compensation
+// bit [6:0]: any_th: any_th = (1 + any_th(register value)) * 16 LSB. The any_th scales with the range setting
+u8 reg_motion_intr;
+
+// Register 0x1C
+// bit[7:6]: awake_dur: 0=8 samples, 1=16 samples, 2=32 samples, 3=64 samples
+// bit[5:4]: any_dursample: 0=4 samples, 1=8 samples, 2=12 samples, 3=16 samples
+// bit 2:    any_en_z: ‘1’ (‘0’) enables (disables) any motion interrupt for z-axis
+// bit 1:    any_en_y: ‘1’ (‘0’) enables (disables) any motion interrupt for y-axis
+// bit 0:    any_en_x: ‘1’ (‘0’) enables (disables) any motion interrupt for x-axis
+// If one of the bits any_x/y/z is enabled, the any motion interrupt is enabled
+u8 reg_int_map_5;
+
+// Register 0x21 (INT_RST_LATCH)
+// Contains the interrupt reset bit and the interrupt mode selection.
+// bit 7:  reset_int:    write ‘1’-clear any latched interrupts, or ‘0’-keep latched interrupts active
+//                       write ‘1’-resets internal interrupt status of each interrupt
+// bit 6:  offset_reset: write ‘1’-clear any latched interrupts, or ‘0’-keep latched interrupts active
+// bit 4:  latch_status_bit
+// bit3:0: latch_int<3:0>: write ‘1’-resets the Offset value calculated with FastOffset, SlowOffset & AutoOffset
+// 0000b - non-latched,
+// 0001b - temporary, 250 ms,
+// 0010b - temporary, 500 ms,  ́0011b ́ à temporary, 1 s,
+// 0100b - temporary, 2 s,
+// 0101b - temporary, 4 s,
+// 0110b - temporary, 8 s,
+// 0111b - latched,
+// 1000b - non-latched,
+// 1001b - temporary, 250ms
+// 1010b - temporary, 500ms
+// 1011b - temporary, 1 ms,
+// 1100b - temporary, 12.5 ms,
+// 1101b - temporary, 25 ms,
+// 1110b - temporary, 50 ms,
+// 1111b - latched
+u8 reg_int_rst_latch;
+
+// Register 0x22 (High_Th_x)
+// Contains the high rate threshold and high rate hysteresis setting for the x-axis
+// bit[6:7]: high_hy_x: high_hy_x = (255 + 256 * high_hy_x(register value)) *4 LSB
+//           The high_hy_x scales with the range setting
+// bit[5:1]: high_th_x: high_th_x = (255 + 256 * high_th_x(register value)) *4 LSB
+//           The high_th_x scales with the range setting
+// bit0:     high_en_x: ‘1’ (‘0’) enables (disables) high rate interrupt for x-axis
+u8 reg_high_th_x;
+
+// Register 0x23 (High_Dur_x)
+// high_dur time_x = (1 + high_dur_x(register value))*2.5ms
+u8 reg_high_dur_x;
+
+// Register 0x24 (High_Th_y)
+u8 reg_high_th_y;
+
+// Register 0x25 (High_Dur_y)
+u8 reg_high_dur_y;
+
+// Register 0x26 (High_Th_z)
+u8 reg_high_th_z;
+
+// Register 0x27 (High_Dur_z)
+u8 reg_high_dur_z;
+
+// Register 0x31 (SOC)
+// Contains the slow offset cancellation setting.
+// ...
+u8 reg_soc;
+
+// Register 0x32 (A_FOC)
+// Contains the fast offset cancellation setting.
+// ...
+u8 reg_a_foc;
+
+// Register 0x36 (OFC1)
+// Register 0x37 (OFC2)
+// Register 0x38 (OFC3)
+// Register 0x39 (OFC4)
+// Contains offset compensation values.
+u8 reg_ofc1;
+u8 reg_ofc2;
+u8 reg_ofc3;
+u8 reg_ofc4;
+
+// Register 0x3C (BIST)
+// bit 4: rate_ok:    '1' - indicates proper sensor function, no trigger is needed for this
+// bit 2: bist_fail:  
+// bit 1: bist_ready: if bist_rdy is `1` and bist_fail is 0 result of bist test is ok means “sensor ok”
+//                    if bist_rdy is `1` and bist_fail is 1 result of bist test is not ok means “sensor values not in expected range”
+// bit 0: trig_bist:  write 1 in order to perform the bist test
+u8 reg_bist;
+
+/*
+ * In suspend mode, enforce a 500us delay between writes
+ */
+function void enforce_write_timeout () 
+{
+    assert (!write_timeout);
+    if(reg_lpm1[4:7] != BMG160_MODE_NORMAL) write_timeout=true;
+};
+
+function void enforce_normal_mode () {
+    assert (!write_timeout);
+    assert (reg_lpm1[4:7] != BMG160_MODE_NORMAL);
+};
+
+task controllable wait_write_timeout () {
+    write_timeout = false;
+};
+
+task controllable wait_resume_timeout () {
+    resume_timeout = false;
+};
+
+
+// Power management
+task controllable write_reg_lpm1(u8 v) {
+    enforce_write_timeout();
+    case (v[4:7]) {
+        BMG160_MODE_NORMAL: {
+
+               // delay when waking up from suspend
+               if (reg_lpm1[4:7] != BMG160_MODE_NORMAL)
+                   resume_timeout = true;
+            }
+        BMG160_MODE_DEEP_SUSPEND: {
+                // forget configuration
+                resume_timeout = false;
+                reset();
+            }
+        BMG160_MODE_SUSPEND: {
+                resume_timeout = false;
+            };
+        default: assert(false);
+    }
+    reg_lpm1  = v;    
+};
+
+function pm_state_t power_state() {
+    case (reg_lpm1[4:7]) {
+        BMG160_MODE_NORMAL: 
+            if resume_timeout 
+                return PM_TRANSITION;
+            else 
+                return PM_NORMAL;
+        BMG160_MODE_DEEP_SUSPEND:  
+            return PM_DEEP_SUSPEND;
+        BMG160_MODE_SUSPEND:       
+            return PM_SUSPEND;
+    }
+}
+
+
+// Interrupt control
+
+// - Trigger condition fulfilled -> status bit set -> interrupt triggered
+// - state of interrupt = logic or of all interrupts mapped to it
+// - if an interrupt is disabled, all active status bits are cleared
+// - Interrupts are fully functional in normal mode and are limited in other modes
+// - In non-latched mode the interrupt status is cleared as soon as the condition is no more valid
+// - In latched mode, interrupt is cleared by writing 1 to reset_int
+
+// What the driver does:
+
+// interrupt mode (common to all interrupts)
+task controllable void write_reg_int_rst_latch(u8 v) {
+    enforce_normal_mode();
+    if (v[7:7]) {
+        // reset interrupt status
+        reg_int_status_1[7:7] = 1'h0;
+        reg_int_status_2[0:0] = 1'h0; // x axis
+        reg_int_status_2[1:1] = 1'h0; // y axis
+        reg_int_status_2[2:2] = 1'h0; // z axis
+    };
+    reg_int_rst_latch[0:5] = v[0:5];
+};
+
+task controllable void write_reg_int_en_0(u8 v) {
+    enforce_normal_mode();
+    if (v[7:7] = 1'h0) reg_int_status_1[7:7] = 1'h0;
+    reg_int_en_0 = v;
+};
+
+task controllable void write_reg_int_en_1(u8 v) {
+    enforce_normal_mode();
+    reg_int_en_1 = v;
+};
+
+task controllable void write_reg_int_map_0(u8 v) {
+    enforce_normal_mode();
+    reg_int_map_0 = v;
+};
+
+task controllable void write_reg_int_map_1(u8 v) {
+    enforce_normal_mode();
+    reg_int_map_1 = v;
+};
+
+task controllable void write_reg_int_map_5(u8 v) {
+    enforce_normal_mode();
+    if (v[0:0] = 1'h0) reg_int_status_2[0:0] = 1'h0;
+    if (v[1:1] = 1'h0) reg_int_status_2[1:1] = 1'h0;
+    if (v[2:2] = 1'h0) reg_int_status_2[2:2] = 1'h0;
+    reg_int_map_5 = v;
+};
+
+task controllable u8 read_reg_int_status_0() {
+    uint<1> high_int_status;
+    high_int_status = *;
+    return (1'b0 ++ any_int_status ++ high_int_status ++ 5'b00000);
+};
+
+task controllable u8 read_reg_int_status_1() {
+    return reg_int_status_1;
+};
+
+task controllable u8 read_reg_int_status_2() {
+    return reg_int_status_2;
+};
+
+// bandwidth
+task controllable write_reg_bw(u8 v) {
+    enforce_normal_mode();
+    assert(v[3:3] == 1'b0);
+    assert(v[4:7] == 4'b0);
+    reg_bw[0:3] = v[0:3];
+};
+
+function u16 filter_bandwidth() {
+    case (reg_bw[0:3]) {
+        BMG_BW_32:  return 32;
+        BMG_BW_64:  return 64;
+        BMG_BW_12:  return 12;
+        BMG_BW_23:  return 23;
+        BMG_BW_47:  return 47;
+        BMG_BW_116: return 116;
+        BMG_BW_230: return 230;
+        BMG_BW_523: return 523;
+    };
+    return 0;
+}
+
+function u16 output_data_rate() {
+    case (reg_bw[0:3]) {
+        BMG_BW_32:  return 100;
+        BMG_BW_64:  return 200;
+        BMG_BW_12:  return 100;
+        BMG_BW_23:  return 200;
+        BMG_BW_47:  return 400;
+        BMG_BW_116: return 1000;
+        BMG_BW_230: return 2000;
+        BMG_BW_523: return 2000;
+    };
+    return 0;
+}
+
+
+
+// range (resolution)
+task controllable write_reg_range(u8 v) {
+    enforce_normal_mode();
+    assert(v[3:7] == 5'b0);
+    reg_range[0:2] = v[0:2];
+};
+
+//function u16 angular_scale() {
+//    case (reg_range[0:2]) {
+//       BMG160_RANGE_2000DPS: return 2000;
+//       BMG160_RANGE_1000DPS: return 1000;
+//       BMG160_RANGE_500DPS:  return 500;
+//       BMG160_RANGE_250DPS:  return 250;
+//       BMG160_RANGE_125DPS:  return 125;
+//    };
+//    return 0;
+//};
+
+// magic numbers from the Linux driver
+function u16 angular_scale() {
+    case (reg_range[0:2]) {
+       BMG160_RANGE_2000DPS: return 1065;
+       BMG160_RANGE_1000DPS: return 532;
+       BMG160_RANGE_500DPS:  return 266;
+       BMG160_RANGE_250DPS:  return 133;
+       BMG160_RANGE_125DPS:  return 66;
+    };
+    return 0;
+};
+
+
+
+// Temperature
+process pevents {
+    forever {
+        pause;
+        // if non-latched, clear interrupts
+        if (reg_int_rst_latch[0:3] != 4'b1111) {
+            if (*) reg_int_status_1[7:7] = 1'h0;
+            if (*) reg_int_status_2[0:0] = 1'h0; // x axis
+            if (*) reg_int_status_2[1:1] = 1'h0; // y axis
+            if (*) reg_int_status_2[2:2] = 1'h0; // z axis
+        }
+        if (is_mode_normal()) {
+            if (*) {
+                if (!x_msb_lock) {
+                    reg_rate_x_lsb = *;
+                    reg_rate_x_msb = *;
+                };
+                if (!y_msb_lock) {
+                    reg_rate_y_lsb = *;
+                    reg_rate_y_msb = *;
+                };
+                if (!z_msb_lock) {
+                    reg_rate_z_lsb = *;
+                    reg_rate_z_msb = *;
+                };
+                // if data interrupt is enabled, set status bit
+                if ((reg_int_en_0[7:7] == 1'h1))
+                    reg_int_status_1[7:7] = 1'h1;
+            };
+            if (*) {
+                // if any motion interrupt for X axis is enabled, set status bits
+                if ((reg_int_map_5[0:0] == 1'h1)) {
+                    reg_int_status_2[0:0] = 1'h1; // x axis
+                    reg_int_status_2[3:3] = *;    // sign of any motion interrupt
+                };
+            };
+            if (*) {
+                // if any motion interrupt for Y axis is enabled, set status bits
+                if ((reg_int_map_5[1:1] == 1'h1)) {
+                    reg_int_status_2[1:1] = 1'h1; // y axis
+                    reg_int_status_2[3:3] = *;    // sign of any motion interrupt
+                };
+            };
+            if (*) {
+                // if any motion interrupt for Y axis is enabled, set status bits
+                if ((reg_int_map_5[2:2] == 1'h1)) {
+                    reg_int_status_2[2:2] = 1'h1; // z axis
+                    reg_int_status_2[3:3] = *;    // sign of any motion interrupt
+                };
+            };
+        };
+        reg_temp = *;
+    };
+};
+
+// (any motion interrupt is signalled and is routed to PIN1
+//  OR data interrupt is signalled and is routed to PIN1) AND
+// INT1 pin is in push-pull mode
+wire bool irq_asserted = if ((any_int_status && (reg_int_map_0[1:1]) ||
+                             (reg_int_status_1[7:7] == 1'h1) && (reg_int_map_1[0:0])) &&
+                             (reg_int_en_1[1:1] == 1'h0));
+
+task controllable u8 read_reg_temp() {
+    return reg_temp;
+};
+
+function u32 raw_chip_temperature() {
+    return reg_temp ++ 24'h0;
+};
+
+// Reading data
+
+task controllable u8 read_reg_x_lsb() {
+    x_msb_lock = true;
+    return reg_rate_x_lsb;
+};
+
+task controllable u8 read_reg_x_msb() {
+    x_msb_lock = false;
+    return reg_rate_x_msb;
+};
+
+task controllable u8 read_reg_y_lsb() {
+    y_msb_lock = true;
+    return reg_rate_y_lsb;
+};
+
+task controllable u8 read_reg_y_msb() {
+    y_msb_lock = false;
+    return reg_rate_y_msb;
+};
+
+task controllable u8 read_reg_z_lsb() {
+    z_msb_lock = true;
+    return reg_rate_z_lsb;
+};
+
+task controllable u8 read_reg_z_msb() {
+    z_msb_lock = false;
+    return reg_rate_z_msb;
+};
+
+
+endtemplate
