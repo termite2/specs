@@ -1,0 +1,41 @@
+template bmg160_drv(bmg160 dev)
+
+derive gyro_drv;
+
+task uncontrollable void probe() {
+    ...;
+};
+
+task uncontrollable void set_bandwidth() {
+    ...;
+};
+
+task uncontrollable void set_scale() {
+    ...;
+};
+
+task uncontrollable void set_slope_threshold() {
+    ...;
+};
+
+task uncontrollable void get_temperature() {
+    ...;
+};
+
+task uncontrollable void get_x () {
+    ...;
+};
+
+task uncontrollable void get_y () {
+    ...;
+};
+
+task uncontrollable void get_z () {
+    ...;
+};
+
+task uncontrollable void get_xyz () {
+    ...;
+};
+
+endtemplate

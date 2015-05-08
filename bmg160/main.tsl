@@ -1,0 +1,7 @@
+template main
+
+bmg160     dev;
+bmg160_drv drv(dev);
+gyro_os    os(drv);
+
+endtemplate

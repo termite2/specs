@@ -1,0 +1,67 @@
+template dma_os(dma_drv drv)
+    export uint<32> req_address;
+    export uint<32> req_size;
+    bool done;
+
+    process pos {
+        forever {
+            req_address = *;
+            req_size = *;
+            done = false;
+            drv.do_transfer ();
+            assert(done);
+            pause;
+        };
+    };
+
+    procedure void transfer_complete(uint<32> addr, uint<32> size) {
+        assert ((addr == req_address) && (size == req_size));
+        done = true;
+    };
+endtemplate
+
+template dma_dev (dma_os os)
+
+    uint<32> reg_address;
+    uint<32> reg_size;
+    bool reg_cmd = false;
+
+    task controllable void write_addr(uint<32> addr) {
+        reg_address = addr;
+    };
+
+    task controllable void write_size(uint<32> size) {
+        reg_size = size;
+    };
+
+    task controllable void write_cmd (bool b) {
+        reg_cmd = b;
+    };
+
+    task controllable bool read_cmd () {
+        return reg_cmd;
+    };
+
+
+    process p_transfer {
+        forever {
+            wait(reg_cmd);
+            os.transfer_complete(reg_address, reg_size);
+            reg_cmd = false;
+        };
+    };
+endtemplate
+
+template dma_drv(dma_dev dev, dma_os os)
+    task uncontrollable void do_transfer() 
+    {
+        ...;
+    };
+endtemplate
+
+template main
+    instance dma_dev dev(os);
+    instance dma_os  os(drv);
+    instance dma_drv drv(dev, os);
+endtemplate
+
